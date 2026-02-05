@@ -46,3 +46,6 @@ app.*.map.json
 
 
 /assets
+
+# 火山引擎等远程 API 密钥（勿提交）
+config/volcengine.json
