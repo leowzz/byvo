@@ -226,23 +226,33 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   }
 
   /// 录音与转写重叠：每段录完立即开始下一段，当前段在后台转写，不阻塞录音与 UI。
+  /// 在 stop() 后立刻 start(下一段)，避免两段之间的间隙丢字。
   Future<void> _runRealtimeLoop() async {
     const Duration chunkDuration = Duration(seconds: 3);
-    while (mounted && _isRealtimeTranscribing) {
-      final Directory tempDir = await getTemporaryDirectory();
-      final String path = '${tempDir.path}${Platform.pathSeparator}realtime_${DateTime.now().millisecondsSinceEpoch}.wav';
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.wav),
-        path: path,
-      );
-      if (!mounted || !_isRealtimeTranscribing) break;
-      setState(() => _isRecording = true);
+    final Directory tempDir = await getTemporaryDirectory();
+    String pathCurrent =
+        '${tempDir.path}${Platform.pathSeparator}realtime_${DateTime.now().millisecondsSinceEpoch}.wav';
+    await _recorder.start(
+      const RecordConfig(encoder: AudioEncoder.wav),
+      path: pathCurrent,
+    );
+    if (!mounted || !_isRealtimeTranscribing) return;
+    setState(() => _isRecording = true);
 
+    while (mounted && _isRealtimeTranscribing) {
       await Future.delayed(chunkDuration);
       if (!mounted || !_isRealtimeTranscribing) break;
 
       final String? stoppedPath = await _recorder.stop();
-      if (mounted) setState(() => _isRecording = false);
+      if (!mounted || !_isRealtimeTranscribing) break;
+      // 立即开始下一段，缩小间隙，减少边界丢字
+      final String pathNext =
+          '${tempDir.path}${Platform.pathSeparator}realtime_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.wav),
+        path: pathNext,
+      );
+      if (mounted) setState(() => _isRecording = true);
       if (!mounted || !_isRealtimeTranscribing) break;
 
       if (stoppedPath != null && File(stoppedPath).existsSync()) {
@@ -270,7 +280,6 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
           });
         }
       }
-      // 不 await 转写，直接进入下一轮录音，实现「边说边录、后台出字」
     }
   }
 
