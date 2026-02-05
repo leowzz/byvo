@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="sqlite:///./byvo.db")
     volcengine: VolcengineConfig = Field(default_factory=VolcengineConfig)
-    sensevoice_model_dir: str = Field(default="./models/sensevoice")
+    sensevoice_model_dir: str = Field(default="models/sensevoice")
 
     @classmethod
     def settings_customise_sources(

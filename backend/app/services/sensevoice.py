@@ -5,7 +5,7 @@ from pathlib import Path
 import soundfile as sf
 from loguru import logger
 
-from app.config import settings
+from app.config import BASE_DIR, settings
 
 
 def transcribe_sensevoice(audio_path: str | Path) -> tuple[str, str | None, str | None, str | None]:
@@ -16,7 +16,7 @@ def transcribe_sensevoice(audio_path: str | Path) -> tuple[str, str | None, str 
     """
     import sherpa_onnx  # 延迟导入，避免启动时 DLL 加载失败
 
-    model_dir = Path(settings.sensevoice_model_dir)
+    model_dir = BASE_DIR / Path(settings.sensevoice_model_dir)
     model_path = model_dir / "model.int8.onnx"
     tokens_path = model_dir / "tokens.txt"
 
