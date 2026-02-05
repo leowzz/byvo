@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config/backend_config.dart';
 import 'transcription/backend_engine.dart';
+import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_engine.dart';
 import 'transcription/transcription_result.dart';
 
@@ -54,6 +56,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   bool _isRealtimeTranscribing = false;
   String _realtimeText = '';
   final AudioRecorder _recorder = AudioRecorder();
+  RealtimeStreamEngine? _realtimeStreamEngine;
+  StreamSubscription<String>? _realtimeTextSub;
 
   @override
   void initState() {
@@ -140,7 +144,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     }
   }
 
-  /// 开始实时转写：按片长录音 → 转写 → 追加结果，循环直到停止。
+  /// 开始实时转写：豆包用流式 WS，SenseVoice 用分块 HTTP。
   Future<void> _startRealtimeTranscribe() async {
     final bool hasPermission = await _recorder.hasPermission();
     if (!hasPermission) {
@@ -150,18 +154,61 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     if (!mounted) return;
     setState(() {
       _isRealtimeTranscribing = true;
+      _realtimeText = '';
       _error = null;
     });
-    _runRealtimeLoop();
+
+    if (_engineIndex == 1) {
+      _runRealtimeStream();
+    } else {
+      _runRealtimeLoop();
+    }
+  }
+
+  /// 豆包流式转写：record.startStream + WebSocket，无分块间隙。
+  Future<void> _runRealtimeStream() async {
+    final engine = RealtimeStreamEngine();
+    _realtimeStreamEngine = engine;
+    try {
+      await engine.start();
+      if (!mounted || !_isRealtimeTranscribing) return;
+      setState(() => _isRecording = true);
+
+      _realtimeTextSub = engine.textStream.listen((String text) {
+        if (!mounted || !_isRealtimeTranscribing) return;
+        if (text.isNotEmpty) {
+          setState(() => _realtimeText = _realtimeText + text);
+        }
+      }, onError: (Object e) {
+        if (kDebugMode) debugPrint('Realtime stream error: $e');
+        if (mounted) setState(() => _error = e.toString());
+      });
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('Realtime stream start error: $e\n$st');
+      if (mounted) setState(() => _error = e.toString());
+      setState(() {
+        _isRealtimeTranscribing = false;
+        _isRecording = false;
+      });
+    }
   }
 
   /// 停止实时转写：只关实时转写与录音器，不进入「录制」流程，不写 _audioPath。
-  void _stopRealtimeTranscribe() {
-    setState(() {
-      _isRealtimeTranscribing = false;
-      _isRecording = false;
-    });
-    _recorder.stop();
+  Future<void> _stopRealtimeTranscribe() async {
+    if (_realtimeStreamEngine != null) {
+      await _realtimeTextSub?.cancel();
+      await _realtimeStreamEngine!.stop();
+      _realtimeStreamEngine = null;
+      _realtimeTextSub = null;
+    } else {
+      _recorder.stop();
+    }
+    if (mounted) {
+      setState(() {
+        _isRealtimeTranscribing = false;
+        _isRecording = false;
+      });
+    }
   }
 
   Future<void> _openBackendSettings(BuildContext context) async {

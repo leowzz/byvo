@@ -64,8 +64,8 @@ flutter:
   uses-material-design: true
 
   # SenseVoice Small（阿里）模型目录：将 model.int8.onnx 与 tokens.txt 放入 assets/sensevoice/
-  assets:
-    - assets/sensevoice/
+  # assets:
+  #   - assets/sensevoice/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

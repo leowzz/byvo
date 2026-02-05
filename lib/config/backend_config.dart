@@ -16,3 +16,14 @@ Future<void> saveBackendUrl(String url) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(_keyBackendUrl, url);
 }
+
+/// 将 HTTP(S) base URL 转为 WebSocket URL。
+String backendUrlToWebSocket(String baseUrl) {
+  if (baseUrl.startsWith('https://')) {
+    return baseUrl.replaceFirst('https://', 'wss://');
+  }
+  if (baseUrl.startsWith('http://')) {
+    return baseUrl.replaceFirst('http://', 'ws://');
+  }
+  return 'ws://$baseUrl';
+}
