@@ -185,14 +185,15 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               FilledButton.icon(
                 onPressed: _pickModelDir,
                 icon: const Icon(Icons.folder_open),
                 label: const Text('选择模型目录（选 model.int8.onnx）'),
               ),
-              const SizedBox(width: 8),
               if (_modelDir == null)
                 TextButton(
                   onPressed: _loadModelFromAssets,
