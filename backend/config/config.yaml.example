@@ -1,0 +1,10 @@
+# byvo backend 配置示例，复制为 config.yaml 后修改
+
+database_url: sqlite:///./byvo.db
+
+volcengine:
+  app_key: ""
+  access_key: ""
+  resource_id: "volc.seedasr.sauc.duration"
+
+sensevoice_model_dir: ./models/sensevoice

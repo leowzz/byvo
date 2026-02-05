@@ -1,0 +1,1 @@
+"""byvo backend FastAPI application."""

@@ -49,3 +49,12 @@ app.*.map.json
 
 # 火山引擎等远程 API 密钥（勿提交）
 config/volcengine.json
+
+# Backend
+backend/venv/
+backend/.venv/
+backend/.env
+backend/*.db
+backend/config/config.yaml
+backend/config/volcengine.json
+backend/models/sensevoice/

@@ -1,16 +1,51 @@
 # byvo
 
-A new Flutter project.
+语音转写应用：Flutter 客户端 + FastAPI 后端。
 
-## Getting Started
+## 项目结构
 
-This project is a starting point for a Flutter application.
+- `lib/` Flutter 客户端
+- `backend/` FastAPI 后端（SenseVoice、豆包转写、SQLite 持久化）
 
-A few resources to get you started if this is your first Flutter project:
+## 后端
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+使用 uv 作为包管理器。
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 启动
+
+```bash
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 配置
+
+配置使用 YAML 格式，复制 `config/config.yaml.example` 为 `config/config.yaml` 后修改：
+
+```yaml
+database_url: sqlite:///./byvo.db
+volcengine:
+  app_key: ""
+  access_key: ""
+  resource_id: ""
+sensevoice_model_dir: ./models/sensevoice
+```
+
+豆包凭证亦可由环境变量 `VOLCENGINE__APP_KEY`、`VOLCENGINE__ACCESS_KEY`、`VOLCENGINE__RESOURCE_ID` 覆盖。
+
+- **SenseVoice 模型**：将 `model.int8.onnx`、`tokens.txt` 放入 `backend/models/sensevoice/`。可从 [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases) 下载预转换模型。
+
+### API
+
+- `POST /api/v1/transcribe`：multipart/form-data，`audio`（WAV 文件）、`engine`（sensevoice | volcengine）
+- `GET /health`：健康检查
+
+## 客户端
+
+Flutter 客户端通过 HTTP 调用后端转写。在设置中配置后端地址（默认 `http://10.0.2.2:8000`，适用于 Android 模拟器访问本机）。
+
+```bash
+flutter pub get
+flutter run
+```
