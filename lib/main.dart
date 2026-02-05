@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -48,6 +47,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   TranscriptionResult? _result;
   String? _error;
   bool _isRecording = false;
+  bool _isRealtimeTranscribing = false;
+  String _realtimeText = '';
   final AudioRecorder _recorder = AudioRecorder();
 
   @override
@@ -64,43 +65,6 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     if (dir != null && mounted) {
       setState(() {
         _modelDir = dir;
-        _error = null;
-      });
-    }
-  }
-
-  /// 选择模型文件所在目录（当前以 .onnx 选文件，取父目录）。
-  Future<void> _pickModelDir() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['onnx'],
-    );
-    if (result == null || result.files.single.path == null) return;
-    final String path = result.files.single.path!;
-    final String dir = File(path).parent.path;
-    final String tokensPath = '$dir${Platform.pathSeparator}tokens.txt';
-    if (!File(tokensPath).existsSync()) {
-      if (mounted) setState(() => _error = '该目录下缺少 tokens.txt');
-      return;
-    }
-    if (mounted) {
-      setState(() {
-        _modelDir = dir;
-        _error = null;
-      });
-    }
-  }
-
-  Future<void> _pickWavFile() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-      allowedExtensions: ['wav', 'WAV'],
-    );
-    if (result == null || result.files.single.path == null) return;
-    final String path = result.files.single.path!;
-    if (mounted) {
-      setState(() {
-        _audioPath = path;
         _error = null;
       });
     }
@@ -184,6 +148,69 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     );
   }
 
+  /// 开始实时转写：按片长录音 → 转写 → 追加结果，循环直到停止。
+  Future<void> _startRealtimeTranscribe() async {
+    if (_modelDir == null) {
+      setState(() => _error = '模型未加载，请等待 assets 加载完成');
+      return;
+    }
+    final bool hasPermission = await _recorder.hasPermission();
+    if (!hasPermission) {
+      if (mounted) setState(() => _error = '需要麦克风权限');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _isRealtimeTranscribing = true;
+      _error = null;
+    });
+    _runRealtimeLoop();
+  }
+
+  void _stopRealtimeTranscribe() {
+    setState(() => _isRealtimeTranscribing = false);
+    if (_isRecording) _recorder.stop();
+  }
+
+  /// 录音与转写重叠：每段录完立即开始下一段，当前段在后台转写，不阻塞录音与 UI。
+  Future<void> _runRealtimeLoop() async {
+    const Duration chunkDuration = Duration(seconds: 3);
+    while (mounted && _isRealtimeTranscribing) {
+      final Directory tempDir = await getTemporaryDirectory();
+      final String path = '${tempDir.path}${Platform.pathSeparator}realtime_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.wav),
+        path: path,
+      );
+      if (!mounted || !_isRealtimeTranscribing) break;
+      setState(() => _isRecording = true);
+
+      await Future.delayed(chunkDuration);
+      if (!mounted || !_isRealtimeTranscribing) break;
+
+      final String? stoppedPath = await _recorder.stop();
+      if (mounted) setState(() => _isRecording = false);
+      if (!mounted || !_isRealtimeTranscribing) break;
+
+      if (stoppedPath != null && File(stoppedPath).existsSync() && _modelDir != null) {
+        final String pathToTranscribe = stoppedPath;
+        final String modelDir = _modelDir!;
+        compute(
+          (p) => transcribeSenseVoiceInIsolate(p.$1, p.$2),
+          (modelDir, pathToTranscribe),
+        ).then((TranscriptionResult result) {
+          if (!mounted || !_isRealtimeTranscribing) return;
+          if (result.text.isNotEmpty) {
+            setState(() => _realtimeText = _realtimeText + result.text);
+          }
+        }).catchError((Object e) {
+          if (kDebugMode) debugPrint('Realtime chunk error: $e');
+        });
+      }
+      // 不 await 转写，直接进入下一轮录音，实现「边说边录、后台出字」
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool needModel = _engine.needsLocalModel;
@@ -201,37 +228,17 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
           const SizedBox(height: 4),
           Text(
             needModel
-                ? (_modelDir != null
-                    ? '已选目录: ${_modelDir!.length > 50 ? '...${_modelDir!.substring(_modelDir!.length - 50)}' : _modelDir}'
-                    : '未选择（将 model.int8.onnx 与 tokens.txt 放入 assets/sensevoice/ 或点击下方选择）')
+                ? (_modelDir != null ? '模型：已从 assets 加载' : '模型：未加载')
                 : '当前引擎无需本地模型',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: 8),
-          if (needModel)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: _pickModelDir,
-                  icon: const Icon(Icons.folder_open),
-                  label: const Text('选择模型目录（选 model.int8.onnx）'),
-                ),
-                if (_engine is SenseVoiceEngine && _modelDir == null)
-                  TextButton(
-                    onPressed: _loadModelFromAssets,
-                    child: const Text('从 assets 加载'),
-                  ),
-              ],
-            ),
           const SizedBox(height: 24),
           const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(
             _audioPath != null
                 ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
-                : '选择 WAV 或录制',
+                : '录制后点击转写',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
@@ -240,12 +247,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: _isTranscribing ? null : _pickWavFile,
-                icon: const Icon(Icons.audiotrack),
-                label: const Text('选择 WAV'),
-              ),
-              FilledButton.icon(
-                onPressed: _isTranscribing
+                onPressed: _isTranscribing || _isRealtimeTranscribing
                     ? null
                     : _isRecording
                         ? _stopRecording
@@ -253,16 +255,29 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
                 icon: Icon(_isRecording ? Icons.stop : Icons.mic),
                 label: Text(_isRecording ? '停止录制' : '录制'),
               ),
+              FilledButton.icon(
+                onPressed: _isRealtimeTranscribing
+                    ? _stopRealtimeTranscribe
+                    : (_isTranscribing || _modelDir == null || _isRecording ? null : _startRealtimeTranscribe),
+                icon: _isRealtimeTranscribing ? const Icon(Icons.stop_circle) : const Icon(Icons.record_voice_over),
+                label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
+              ),
             ],
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: (_isTranscribing || !canTranscribe) ? null : _transcribe,
+            onPressed: (_isTranscribing || _isRealtimeTranscribing || !canTranscribe) ? null : _transcribe,
             icon: _isTranscribing
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.transcribe),
             label: Text(_isTranscribing ? '转写中…' : '转写'),
           ),
+          if (_realtimeText.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            SelectableText(_realtimeText),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 16),
             Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
