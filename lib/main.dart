@@ -95,6 +95,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
           _error = null;
         }
       });
+      if (path != null && _modelDir != null) {
+        _transcribe();
+      }
     }
   }
 
