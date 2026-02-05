@@ -7,25 +7,25 @@ todos:
     status: completed
   - id: model-place
     content: 将 .bin 放入 assets/models/ 或实现「选择模型文件」UI，确定应用内模型路径来源
-    status: in_progress
+    status: completed
   - id: deps-permissions
     content: pubspec 增加 whisper_kit、file_picker、record；AndroidManifest 增加 RECORD_AUDIO 及选文件权限
-    status: pending
+    status: completed
   - id: whisper-override
     content: dependency override 引入本地 whisper_kit，在 Whisper 类增加 modelPath 支持并跳过下载、使用该路径转写
-    status: pending
+    status: completed
   - id: ui-page
     content: 替换 main.dart 为单页 UI：选择 WAV / 录制、模型路径（若用户选择）、loading、转写结果与 segments
-    status: pending
+    status: completed
   - id: transcribe-call
     content: "集成转写调用 Whisper(modelPath).transcribe(TranscribeRequest(audio, language: zh))，结果展示，可选 isolate/compute"
-    status: pending
+    status: completed
   - id: assets-copy
     content: 若用 assets 方案，实现首次启动从 assets/models 复制 .bin 到 getApplicationSupportDirectory()
-    status: pending
+    status: completed
   - id: build-verify
     content: 确认 minSdk≥24、NDK/CMake 可用，真机运行并验证选 WAV/录音→转写→展示
-    status: pending
+    status: completed
 isProject: false
 ---
 
