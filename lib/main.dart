@@ -5,10 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:sherpa_onnx/sherpa_onnx.dart';
 
 import 'sensevoice_model_loader.dart';
-import 'sensevoice_service.dart';
+import 'transcription/sensevoice_engine.dart';
+import 'transcription/transcription_engine.dart';
+import 'transcription/transcription_result.dart';
 
 void main() {
   runApp(const MyApp());
@@ -20,28 +21,31 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'byvo SenseVoice MVP',
+      title: 'byvo',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const SenseVoiceMvpPage(),
+      home: const TranscriptionMvpPage(),
     );
   }
 }
 
-class SenseVoiceMvpPage extends StatefulWidget {
-  const SenseVoiceMvpPage({super.key});
+class TranscriptionMvpPage extends StatefulWidget {
+  const TranscriptionMvpPage({super.key});
 
   @override
-  State<SenseVoiceMvpPage> createState() => _SenseVoiceMvpPageState();
+  State<TranscriptionMvpPage> createState() => _TranscriptionMvpPageState();
 }
 
-class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
+class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
+  /// 当前推理引擎（可替换为 Whisper、API 等）
+  final TranscriptionEngine _engine = SenseVoiceEngine();
+
   String? _modelDir;
   String? _audioPath;
   bool _isTranscribing = false;
-  OfflineRecognizerResult? _result;
+  TranscriptionResult? _result;
   String? _error;
   bool _isRecording = false;
   final AudioRecorder _recorder = AudioRecorder();
@@ -49,10 +53,13 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
   @override
   void initState() {
     super.initState();
-    _loadModelFromAssets();
+    if (_engine.needsLocalModel && _engine is SenseVoiceEngine) {
+      _loadModelFromAssets();
+    }
   }
 
   Future<void> _loadModelFromAssets() async {
+    if (_engine is! SenseVoiceEngine) return;
     final String? dir = await ensureSenseVoiceModelFromAssets();
     if (dir != null && mounted) {
       setState(() {
@@ -62,7 +69,7 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
     }
   }
 
-  /// 选择 model.int8.onnx 文件，模型目录取其所在目录。
+  /// 选择模型文件所在目录（当前以 .onnx 选文件，取父目录）。
   Future<void> _pickModelDir() async {
     final FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -128,8 +135,12 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
   }
 
   Future<void> _transcribe() async {
-    if (_modelDir == null || _audioPath == null) {
-      setState(() => _error = '请先选择模型目录和音频');
+    if (_engine.needsLocalModel && _modelDir == null) {
+      setState(() => _error = '请先选择模型目录');
+      return;
+    }
+    if (_audioPath == null) {
+      setState(() => _error = '请先选择或录制音频');
       return;
     }
     final File audioFile = File(_audioPath!);
@@ -143,10 +154,9 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
       _result = null;
     });
     try {
-      final OfflineRecognizerResult result = await compute(
-        (p) => transcribeWithSenseVoice(p.$1, p.$2),
-        (_modelDir!, _audioPath!),
-      );
+      final TranscriptionResult result = _engine is SenseVoiceEngine
+          ? await _transcribeInIsolate()
+          : await _engine.transcribe(_audioPath!, modelSource: _modelDir);
       if (mounted) {
         setState(() {
           _isTranscribing = false;
@@ -166,41 +176,55 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
     }
   }
 
+  /// 在 isolate 中执行转写（当前仅 SenseVoice 需 isolate，避免阻塞 UI）。
+  Future<TranscriptionResult> _transcribeInIsolate() async {
+    return compute(
+      (p) => transcribeSenseVoiceInIsolate(p.$1, p.$2),
+      (_modelDir!, _audioPath!),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bool needModel = _engine.needsLocalModel;
+    final bool canTranscribe = (!needModel || _modelDir != null) && _audioPath != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('byvo SenseVoice MVP'),
+        title: Text('byvo · ${_engine.displayName}'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('模型（SenseVoice Small 阿里）', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text('模型（${_engine.displayName}）', style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(
-            _modelDir != null
-                ? '已选目录: ${_modelDir!.length > 50 ? '...${_modelDir!.substring(_modelDir!.length - 50)}' : _modelDir}'
-                : '未选择（将 model.int8.onnx 与 tokens.txt 放入 assets/sensevoice/ 或点击下方选择）',
+            needModel
+                ? (_modelDir != null
+                    ? '已选目录: ${_modelDir!.length > 50 ? '...${_modelDir!.substring(_modelDir!.length - 50)}' : _modelDir}'
+                    : '未选择（将 model.int8.onnx 与 tokens.txt 放入 assets/sensevoice/ 或点击下方选择）')
+                : '当前引擎无需本地模型',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: _pickModelDir,
-                icon: const Icon(Icons.folder_open),
-                label: const Text('选择模型目录（选 model.int8.onnx）'),
-              ),
-              if (_modelDir == null)
-                TextButton(
-                  onPressed: _loadModelFromAssets,
-                  child: const Text('从 assets 加载'),
+          if (needModel)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _pickModelDir,
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('选择模型目录（选 model.int8.onnx）'),
                 ),
-            ],
-          ),
+                if (_engine is SenseVoiceEngine && _modelDir == null)
+                  TextButton(
+                    onPressed: _loadModelFromAssets,
+                    child: const Text('从 assets 加载'),
+                  ),
+              ],
+            ),
           const SizedBox(height: 24),
           const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
@@ -211,14 +235,15 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               FilledButton.icon(
                 onPressed: _isTranscribing ? null : _pickWavFile,
                 icon: const Icon(Icons.audiotrack),
                 label: const Text('选择 WAV'),
               ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _isTranscribing
                     ? null
@@ -232,9 +257,7 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: (_isTranscribing || _modelDir == null || _audioPath == null)
-                ? null
-                : _transcribe,
+            onPressed: (_isTranscribing || !canTranscribe) ? null : _transcribe,
             icon: _isTranscribing
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.transcribe),
@@ -249,16 +272,16 @@ class _SenseVoiceMvpPageState extends State<SenseVoiceMvpPage> {
             const Text('转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             SelectableText(_result!.text),
-            if (_result!.emotion.isNotEmpty || _result!.event.isNotEmpty) ...[
+            if (_result!.emotion != null || _result!.event != null) ...[
               const SizedBox(height: 12),
               const Text('情感 / 环境', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               Text(
-                '情感: ${_result!.emotion.isEmpty ? "—" : _result!.emotion}  环境: ${_result!.event.isEmpty ? "—" : _result!.event}',
+                '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
-            if (_result!.lang.isNotEmpty) ...[
+            if (_result!.lang != null) ...[
               const SizedBox(height: 4),
               Text('语种: ${_result!.lang}', style: Theme.of(context).textTheme.bodySmall),
             ],
