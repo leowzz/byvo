@@ -167,9 +167,13 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     _runRealtimeLoop();
   }
 
+  /// 停止实时转写：只关实时转写与录音器，不进入「录制」流程，不写 _audioPath。
   void _stopRealtimeTranscribe() {
-    setState(() => _isRealtimeTranscribing = false);
-    if (_isRecording) _recorder.stop();
+    setState(() {
+      _isRealtimeTranscribing = false;
+      _isRecording = false;
+    });
+    _recorder.stop();
   }
 
   /// 录音与转写重叠：每段录完立即开始下一段，当前段在后台转写，不阻塞录音与 UI。
