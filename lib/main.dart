@@ -252,8 +252,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
                     : _isRecording
                         ? _stopRecording
                         : _startRecording,
-                icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                label: Text(_isRecording ? '停止录制' : '录制'),
+                icon: Icon(_isRealtimeTranscribing ? Icons.mic : (_isRecording ? Icons.stop : Icons.mic)),
+                label: Text(_isRealtimeTranscribing ? '录制' : (_isRecording ? '停止录制' : '录制')),
               ),
               FilledButton.icon(
                 onPressed: _isRealtimeTranscribing
