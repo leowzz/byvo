@@ -76,9 +76,7 @@ class RealtimeStreamEngine {
         try {
           final json = jsonDecode(message) as Map<String, dynamic>;
           final text = json['text'] as String?;
-          if (text != null && text.isNotEmpty) {
-            _textController.add(text);
-          }
+          if (text != null) _textController.add(text);
         } catch (_) {}
       },
       onDone: () {},

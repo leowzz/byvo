@@ -216,7 +216,7 @@ async def transcribe_volcengine_stream(
             finally:
                 send_done.set()
 
-        # 3. 生产者任务：接收豆包响应，yield 文本
+        # 3. 生产者任务：接收豆包响应，yield 当前全文（供前端直接替换显示，避免追加导致重复）
         async def _receive_and_yield() -> AsyncIterator[str]:
             last_text = ""
             async for message in ws:
@@ -247,8 +247,8 @@ async def transcribe_volcengine_stream(
                         t = raw
                     else:
                         t = ""
-                    if t and t != last_text:
-                        yield t[len(last_text) :] if t.startswith(last_text) else t
+                    if t != last_text:
+                        yield t
                         last_text = t
                 except (json.JSONDecodeError, KeyError):
                     pass

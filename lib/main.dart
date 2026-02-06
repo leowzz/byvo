@@ -169,7 +169,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
 
       _realtimeTextSub = engine.textStream.listen((String text) {
         if (!mounted || !_isRealtimeTranscribing) return;
-        if (text.isNotEmpty) _safeSetState(() => _realtimeText = _realtimeText + text);
+        _safeSetState(() => _realtimeText = text);
       }, onError: (Object e) {
         if (kDebugMode) debugPrint('Realtime stream error: $e');
         _safeSetState(() => _error = e.toString());
