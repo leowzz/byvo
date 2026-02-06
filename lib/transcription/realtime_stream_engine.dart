@@ -22,9 +22,19 @@ class RealtimeStreamEngine {
   StreamSubscription? _wsSub;
   final StreamController<String> _textController = StreamController<String>.broadcast();
   bool _stopping = false;
+  DateTime? _lastAudioSentAt;
+  DateTime? _lastResponseAt;
 
   /// 增量识别文本流。
   Stream<String> get textStream => _textController.stream;
+
+  /// 是否已发送完毕：已连接且连续 1 秒无音频发送且 1 秒无服务端返回。
+  bool get isDrainComplete {
+    if (_lastAudioSentAt == null || _lastResponseAt == null) return false;
+    final now = DateTime.now();
+    const d = Duration(seconds: 1);
+    return now.difference(_lastAudioSentAt!) >= d && now.difference(_lastResponseAt!) >= d;
+  }
 
   /// 开始流式转写，连接后端 WS 并开始录音。
   Future<void> start() async {
@@ -36,6 +46,8 @@ class RealtimeStreamEngine {
 
     _recorder = AudioRecorder();
     _stopping = false;
+    _lastAudioSentAt = DateTime.now();
+    _lastResponseAt = DateTime.now();
 
     DebugLog.instance.logApi('实时', 'WS connect $uri');
     _channel = WebSocketChannel.connect(uri);
@@ -60,6 +72,7 @@ class RealtimeStreamEngine {
           final chunk = Uint8List.fromList(buffer.take(_chunkBytes).toList());
           buffer.removeRange(0, _chunkBytes);
           _channel?.sink.add(chunk);
+          _lastAudioSentAt = DateTime.now();
         }
       },
       onDone: () {
@@ -75,6 +88,7 @@ class RealtimeStreamEngine {
 
     _wsSub = _channel!.stream.listen(
       (message) {
+        _lastResponseAt = DateTime.now();
         if (message is! String) return;
         try {
           final json = jsonDecode(message) as Map<String, dynamic>;

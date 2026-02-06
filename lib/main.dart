@@ -3,14 +3,19 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config/backend_config.dart';
 import 'debug_log.dart';
 import 'transcription/backend_engine.dart';
 import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_result.dart';
+
+const String _keyShowFloatingBall = 'show_floating_ball';
 
 void main() {
   if (kDebugMode) {
@@ -64,6 +69,45 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   final AudioRecorder _recorder = AudioRecorder();
   RealtimeStreamEngine? _realtimeStreamEngine;
   StreamSubscription<String>? _realtimeTextSub;
+
+  bool _showFloatingBall = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadShowFloatingBall();
+  }
+
+  Future<void> _loadShowFloatingBall() async {
+    final prefs = await SharedPreferences.getInstance();
+    final show = prefs.getBool(_keyShowFloatingBall) ?? false;
+    if (!mounted) return;
+    setState(() => _showFloatingBall = show);
+    if (show && Platform.isAndroid) {
+      try {
+        if (await FlutterOverlayWindow.isPermissionGranted()) {
+          await _doShowGlobalOverlay();
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// 仅全局悬浮窗（Android）。
+  Future<void> _doShowGlobalOverlay() async {
+    await FlutterOverlayWindow.showOverlay(
+      height: 56,
+      width: 56,
+      alignment: OverlayAlignment.centerRight,
+      enableDrag: true,
+      overlayTitle: 'byvo',
+      overlayContent: '长按转写',
+    );
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
 
   void _safeSetState(VoidCallback fn) {
     if (mounted) setState(fn);
@@ -205,6 +249,58 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     }
   }
 
+  Future<void> _onFloatingBallSwitchChanged(BuildContext context, bool value) async {
+    if (value) {
+      if (!Platform.isAndroid) {
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('全局悬浮球仅支持 Android')),
+          );
+        }
+        return;
+      }
+      try {
+        // 主动弹出系统权限申请（显示在其他应用上层）
+        final granted = await FlutterOverlayWindow.requestPermission();
+        if (!mounted) return;
+        if (granted == true) {
+          await _doShowGlobalOverlay();
+          setState(() => _showFloatingBall = true);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(_keyShowFloatingBall, true);
+        } else {
+          setState(() => _showFloatingBall = false);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
+            );
+          }
+        }
+      } on MissingPluginException {
+        setState(() => _showFloatingBall = false);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('当前环境不支持全局悬浮球')),
+          );
+        }
+      } catch (_) {
+        setState(() => _showFloatingBall = false);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('开启悬浮球失败')),
+          );
+        }
+      }
+      return;
+    }
+    try {
+      await FlutterOverlayWindow.closeOverlay();
+    } catch (_) {}
+    setState(() => _showFloatingBall = false);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowFloatingBall, false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canTranscribe = _audioPath != null;
@@ -226,6 +322,17 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
                   onPressed: () => _openBackendSettings(context),
                   icon: const Icon(Icons.settings),
                   label: const Text('后端地址配置'),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('悬浮球', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Switch(
+                      value: _showFloatingBall,
+                      onChanged: (bool v) => _onFloatingBallSwitchChanged(context, v),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
                 const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -457,6 +564,113 @@ class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
           child: const Text('保存'),
         ),
       ],
+    );
+  }
+}
+
+// ========== 全局悬浮窗（Android 独立 overlay isolate） ==========
+
+/// 全局悬浮窗入口，由 flutter_overlay_window 在独立 isolate 中调用。
+@pragma('vm:entry-point')
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      useMaterial3: true,
+    ),
+    home: const OverlayBallPage(),
+  ));
+}
+
+/// 全局悬浮窗内的球：长按开始实时转写，松手后等发送完毕再关闭。
+class OverlayBallPage extends StatefulWidget {
+  const OverlayBallPage({super.key});
+
+  @override
+  State<OverlayBallPage> createState() => _OverlayBallPageState();
+}
+
+class _OverlayBallPageState extends State<OverlayBallPage> {
+  final AudioRecorder _recorder = AudioRecorder();
+  RealtimeStreamEngine? _engine;
+  StreamSubscription<String>? _textSub;
+  Timer? _drainTimer;
+  bool _isActive = false;
+
+  @override
+  void dispose() {
+    _drainTimer?.cancel();
+    _textSub?.cancel();
+    _engine?.stop();
+    super.dispose();
+  }
+
+  Future<void> _startRealtime() async {
+    if (!await _recorder.hasPermission()) return;
+    setState(() => _isActive = true);
+    final engine = RealtimeStreamEngine();
+    _engine = engine;
+    try {
+      await engine.start();
+      if (!mounted || !_isActive) return;
+      _textSub = engine.textStream.listen((_) {});
+    } catch (e) {
+      if (mounted) setState(() => _isActive = false);
+    }
+  }
+
+  void _scheduleDrain() {
+    _drainTimer?.cancel();
+    _drainTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted || _engine == null) {
+        _drainTimer?.cancel();
+        return;
+      }
+      if (_engine!.isDrainComplete) {
+        _drainTimer?.cancel();
+        _stopRealtime();
+      }
+    });
+  }
+
+  Future<void> _stopRealtime() async {
+    await _textSub?.cancel();
+    await _engine?.stop();
+    _engine = null;
+    _textSub = null;
+    if (mounted) setState(() => _isActive = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: GestureDetector(
+        onLongPressStart: (_) => _startRealtime(),
+        onLongPressEnd: (_) => _scheduleDrain(),
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(
+            _isActive ? Icons.stop : Icons.mic,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            size: 28,
+          ),
+        ),
+      ),
     );
   }
 }
