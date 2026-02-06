@@ -6,14 +6,32 @@ import soundfile as sf
 from loguru import logger
 
 from app.config import BASE_DIR, settings
+from app.schemas.transcription import TranscribeResult
 
 
-def transcribe_sensevoice(audio_path: str | Path) -> tuple[str, str | None, str | None, str | None]:
-    """
-    使用 SenseVoice 转写音频。
+def _extract_result(result: object) -> TranscribeResult:
+    """从 sherpa_onnx 的 result（对象或 dict）提取 text/emotion/event/lang。"""
+    def opt(s: str | None) -> str | None:
+        return (s.strip() or None) if s else None
 
-    :return: (text, emotion, event, lang)
-    """
+    if hasattr(result, "text"):
+        text = result.text or ""
+        emotion = opt(getattr(result, "emotion", None) or "")
+        event = opt(getattr(result, "event", None) or "")
+        lang = opt(getattr(result, "lang", None) or "")
+    elif isinstance(result, dict):
+        text = result.get("text", "") or ""
+        emotion = opt(result.get("emotion"))
+        event = opt(result.get("event"))
+        lang = opt(result.get("lang"))
+    else:
+        text = str(result) if result else ""
+        emotion = event = lang = None
+    return TranscribeResult(text=text, emotion=emotion, event=event, lang=lang)
+
+
+def transcribe_sensevoice(audio_path: str | Path) -> TranscribeResult:
+    """使用 SenseVoice 转写音频。"""
     import sherpa_onnx  # 延迟导入，避免启动时 DLL 加载失败
 
     model_dir = BASE_DIR / Path(settings.sensevoice_model_dir)
@@ -41,24 +59,6 @@ def transcribe_sensevoice(audio_path: str | Path) -> tuple[str, str | None, str 
     stream.accept_waveform(sample_rate, audio)
     recognizer.decode_stream(stream)
 
-    result = stream.result
-    if hasattr(result, "text"):
-        text = result.text or ""
-        emotion = getattr(result, "emotion", None) or ""
-        event = getattr(result, "event", None) or ""
-        lang = getattr(result, "lang", None) or ""
-    elif isinstance(result, dict):
-        text = result.get("text", "") or ""
-        emotion = result.get("emotion")
-        event = result.get("event")
-        lang = result.get("lang")
-    else:
-        text = str(result) if result else ""
-        emotion = event = lang = None
-
-    emotion = (str(emotion).strip() or None) if emotion else None
-    event = (str(event).strip() or None) if event else None
-    lang = (str(lang).strip() or None) if lang else None
-
-    logger.debug(f"{text=} {emotion=} {event=} {lang=}")
-    return (text, emotion, event, lang)
+    out = _extract_result(stream.result)
+    logger.debug(f"{out.text=} {out.emotion=} {out.event=} {out.lang=}")
+    return out

@@ -59,6 +59,17 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   RealtimeStreamEngine? _realtimeStreamEngine;
   StreamSubscription<String>? _realtimeTextSub;
 
+  void _safeSetState(VoidCallback fn) {
+    if (mounted) setState(fn);
+  }
+
+  /// 检查麦克风权限，未授权时设置 _error 并返回 false。
+  Future<bool> _requireMicPermission() async {
+    final bool ok = await _recorder.hasPermission();
+    if (!ok) _safeSetState(() => _error = '需要麦克风权限');
+    return ok;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -69,43 +80,37 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final int? saved = prefs.getInt(_prefEngineIndex);
     final int index = (saved != null && saved >= 0 && saved <= 1) ? saved : 0;
-    if (mounted) setState(() => _engineIndex = index);
+    _safeSetState(() => _engineIndex = index);
   }
 
   Future<void> _setEngineIndex(int index) async {
     if (index == _engineIndex) return;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_prefEngineIndex, index);
-    if (mounted) setState(() => _engineIndex = index);
+    _safeSetState(() => _engineIndex = index);
   }
 
   Future<void> _startRecording() async {
-    final bool hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      if (mounted) setState(() => _error = '需要麦克风权限');
-      return;
-    }
+    if (!await _requireMicPermission()) return;
     final Directory tempDir = await getTemporaryDirectory();
     final String path = '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _recorder.start(
       const RecordConfig(encoder: AudioEncoder.wav),
       path: path,
     );
-    if (mounted) setState(() => _isRecording = true);
+    _safeSetState(() => _isRecording = true);
   }
 
   Future<void> _stopRecording() async {
     final String? path = await _recorder.stop();
-    if (mounted) {
-      setState(() {
-        _isRecording = false;
-        if (path != null) {
-          _audioPath = path;
-          _error = null;
-        }
-      });
-      if (path != null) _transcribe();
-    }
+    _safeSetState(() {
+      _isRecording = false;
+      if (path != null) {
+        _audioPath = path;
+        _error = null;
+      }
+    });
+    if (path != null) _transcribe();
   }
 
   Future<void> _transcribe() async {
@@ -125,39 +130,27 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     });
     try {
       final TranscriptionResult result = await _engine.transcribe(_audioPath!);
-      if (mounted) {
-        setState(() {
-          _isTranscribing = false;
-          _result = result;
-        });
-      }
+      _safeSetState(() {
+        _isTranscribing = false;
+        _result = result;
+      });
     } catch (e, st) {
-      if (kDebugMode) {
-        debugPrint('Transcribe error: $e\n$st');
-      }
-      if (mounted) {
-        setState(() {
-          _isTranscribing = false;
-          _error = e.toString();
-        });
-      }
+      if (kDebugMode) debugPrint('Transcribe error: $e\n$st');
+      _safeSetState(() {
+        _isTranscribing = false;
+        _error = e.toString();
+      });
     }
   }
 
   /// 开始实时转写：豆包用流式 WS，SenseVoice 用分块 HTTP。
   Future<void> _startRealtimeTranscribe() async {
-    final bool hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      if (mounted) setState(() => _error = '需要麦克风权限');
-      return;
-    }
-    if (!mounted) return;
+    if (!await _requireMicPermission()) return;
     setState(() {
       _isRealtimeTranscribing = true;
       _realtimeText = '';
       _error = null;
     });
-
     if (_engineIndex == 1) {
       _runRealtimeStream();
     } else {
@@ -172,20 +165,18 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     try {
       await engine.start();
       if (!mounted || !_isRealtimeTranscribing) return;
-      setState(() => _isRecording = true);
+      _safeSetState(() => _isRecording = true);
 
       _realtimeTextSub = engine.textStream.listen((String text) {
         if (!mounted || !_isRealtimeTranscribing) return;
-        if (text.isNotEmpty) {
-          setState(() => _realtimeText = _realtimeText + text);
-        }
+        if (text.isNotEmpty) _safeSetState(() => _realtimeText = _realtimeText + text);
       }, onError: (Object e) {
         if (kDebugMode) debugPrint('Realtime stream error: $e');
-        if (mounted) setState(() => _error = e.toString());
+        _safeSetState(() => _error = e.toString());
       });
     } catch (e, st) {
       if (kDebugMode) debugPrint('Realtime stream start error: $e\n$st');
-      if (mounted) setState(() => _error = e.toString());
+      _safeSetState(() => _error = e.toString());
       setState(() {
         _isRealtimeTranscribing = false;
         _isRecording = false;
@@ -203,12 +194,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     } else {
       _recorder.stop();
     }
-    if (mounted) {
-      setState(() {
-        _isRealtimeTranscribing = false;
-        _isRecording = false;
-      });
-    }
+    _safeSetState(() {
+      _isRealtimeTranscribing = false;
+      _isRecording = false;
+    });
   }
 
   Future<void> _openBackendSettings(BuildContext context) async {
@@ -230,7 +219,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
       path: pathCurrent,
     );
     if (!mounted || !_isRealtimeTranscribing) return;
-    setState(() => _isRecording = true);
+    _safeSetState(() => _isRecording = true);
 
     while (mounted && _isRealtimeTranscribing) {
       await Future.delayed(chunkDuration);
@@ -238,27 +227,22 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
 
       final String? stoppedPath = await _recorder.stop();
       if (!mounted || !_isRealtimeTranscribing) break;
-      // 立即开始下一段，缩小间隙，减少边界丢字
       final String pathNext =
           '${tempDir.path}${Platform.pathSeparator}realtime_${DateTime.now().millisecondsSinceEpoch}.wav';
       await _recorder.start(
         const RecordConfig(encoder: AudioEncoder.wav),
         path: pathNext,
       );
-      if (mounted) setState(() => _isRecording = true);
+      _safeSetState(() => _isRecording = true);
       if (!mounted || !_isRealtimeTranscribing) break;
 
       if (stoppedPath != null && File(stoppedPath).existsSync()) {
-        final String pathToTranscribe = stoppedPath;
-        final TranscriptionEngine engine = _engine;
         void appendResult(TranscriptionResult result) {
           if (!mounted || !_isRealtimeTranscribing) return;
-          if (result.text.isNotEmpty) {
-            setState(() => _realtimeText = _realtimeText + result.text);
-          }
+          if (result.text.isNotEmpty) _safeSetState(() => _realtimeText = _realtimeText + result.text);
         }
-        engine
-            .transcribe(pathToTranscribe)
+        _engine
+            .transcribe(stoppedPath)
             .then(appendResult)
             .catchError((Object e) {
           if (kDebugMode) debugPrint('Realtime chunk error: $e');

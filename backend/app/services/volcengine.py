@@ -12,6 +12,7 @@ import websockets
 from loguru import logger
 
 from app.config import settings
+from app.schemas.transcription import TranscribeResult
 
 
 WSS_URL_NOSTREAM = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
@@ -61,12 +62,8 @@ def _read_wav_to_16k_mono(path: str | Path) -> tuple[bytes, int]:
     return pcm.tobytes(), sr
 
 
-async def transcribe_volcengine(audio_path: str | Path) -> tuple[str, str | None, str | None, str | None]:
-    """
-    调用豆包 API 转写音频。
-
-    :return: (text, emotion, event, lang) 豆包仅返回 text，其余为 None
-    """
+async def transcribe_volcengine(audio_path: str | Path) -> TranscribeResult:
+    """调用豆包 API 转写音频；豆包仅返回 text，其余为 None。"""
     volc = settings.volcengine
     if not volc.valid:
         raise ValueError("豆包 API 未配置，请设置 config/config.yaml 或环境变量 VOLCENGINE__APP_KEY 等")
@@ -129,7 +126,7 @@ async def transcribe_volcengine(audio_path: str | Path) -> tuple[str, str | None
         # 3. 接收结果
         text = await _receive_final_result(ws)
 
-    return (text, None, None, None)
+    return TranscribeResult(text=text)
 
 
 async def transcribe_volcengine_stream(

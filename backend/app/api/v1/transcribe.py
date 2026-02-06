@@ -15,6 +15,8 @@ from app.services import sensevoice, volcengine
 
 router = APIRouter()
 
+ENGINES = ("sensevoice", "volcengine")
+
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
@@ -26,7 +28,7 @@ async def transcribe(
     上传 WAV 音频，使用指定引擎转写，结果持久化后返回。
     engine: sensevoice | volcengine
     """
-    if engine not in ("sensevoice", "volcengine"):
+    if engine not in ENGINES:
         raise HTTPException(status_code=400, detail=f"不支持的引擎: {engine}")
 
     if not audio.filename or not audio.filename.lower().endswith((".wav", ".wave")):
@@ -42,26 +44,26 @@ async def transcribe(
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(content)
         tmp_path = Path(tmp.name)
-    loop = asyncio.get_running_loop()
-    start = loop.time()
 
     try:
+        loop = asyncio.get_running_loop()
+        start = loop.time()
         if engine == "volcengine":
-            text, emotion, event, lang = await volcengine.transcribe_volcengine(tmp_path)
+            result = await volcengine.transcribe_volcengine(tmp_path)
         else:
-            text, emotion, event, lang = await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 sensevoice.transcribe_sensevoice, tmp_path
             )
 
         elapsed = loop.time() - start
-        logger.info(f"{engine=} {elapsed=:.2f}s {len(text)=}")
+        logger.info(f"{engine=} {elapsed=:.2f}s {len(result.text)=}")
 
         record = TranscriptionRecord(
             engine=engine,
-            text=text,
-            emotion=emotion,
-            event=event,
-            lang=lang,
+            text=result.text,
+            emotion=result.emotion,
+            event=result.event,
+            lang=result.lang,
             audio_size=audio_size,
         )
         db.add(record)
