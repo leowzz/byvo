@@ -21,6 +21,7 @@ def _correct_stream_sync(asr_text: str, history: str, api_key: str, model_id: st
     from volcenginesdkarkruntime import Ark
 
     client = Ark(api_key=api_key)
+    logger.info(f"Ark(豆包) 纠错 输入: {asr_text=}")
     user_content = f"历史文本: {history}\n\n当前待纠错: {asr_text}" if history else f"当前待纠错: {asr_text}"
     chunks: list[str] = []
     try:
@@ -41,6 +42,8 @@ def _correct_stream_sync(asr_text: str, history: str, api_key: str, model_id: st
                 chunks.append(delta.content)
     except Exception as e:
         logger.warning(f"Ark correction error: {e=}")
+    out = "".join(chunks)
+    logger.info(f"Ark(豆包) 纠错 输出: {out=}")
     return chunks
 
 

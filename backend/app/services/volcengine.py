@@ -125,7 +125,7 @@ async def transcribe_volcengine(audio_path: str | Path) -> TranscribeResult:
 
         # 3. 接收结果
         text = await _receive_final_result(ws)
-
+    logger.info(f"ASR(豆包) 结果: {text=}")
     return TranscribeResult(text=text)
 
 
@@ -248,6 +248,7 @@ async def transcribe_volcengine_stream(
                     else:
                         t = ""
                     if t != last_text:
+                        logger.info(f"ASR(豆包) 流式: {t=}")
                         yield t
                         last_text = t
                 except (json.JSONDecodeError, KeyError):

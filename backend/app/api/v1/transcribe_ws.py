@@ -109,7 +109,7 @@ async def transcribe_stream(ws: WebSocket) -> None:
     """
     await ws.accept()
     audio_stream = _audio_stream_from_ws(ws)
-    logger.info("transcribe stream ws connected (correction=%s)", settings.volcengine.ark_valid)
+    logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=}")
 
     try:
         if settings.volcengine.ark_valid:
