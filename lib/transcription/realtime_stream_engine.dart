@@ -31,7 +31,7 @@ class RealtimeStreamEngine {
 
     final baseUrl = await loadBackendUrl();
     final wsUrl = backendUrlToWebSocket(baseUrl);
-    final uri = Uri.parse('$wsUrl/api/v1/transcribe/stream?engine=volcengine');
+    final uri = Uri.parse('$wsUrl/api/v1/transcribe/stream');
 
     _recorder = AudioRecorder();
     _stopping = false;

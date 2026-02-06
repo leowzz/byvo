@@ -7,15 +7,12 @@ import '../config/backend_config.dart';
 import 'transcription_engine.dart';
 import 'transcription_result.dart';
 
-/// 后端转写引擎，将音频 POST 到 FastAPI 后端，支持 sensevoice / volcengine。
+/// 后端转写引擎：音频 POST 到 FastAPI，豆包 ASR。
 class BackendTranscriptionEngine implements TranscriptionEngine {
-  BackendTranscriptionEngine({required this.engine});
-
-  /// 引擎类型：sensevoice | volcengine
-  final String engine;
+  const BackendTranscriptionEngine();
 
   @override
-  String get displayName => engine == 'sensevoice' ? 'SenseVoice (后端)' : '豆包 (后端)';
+  String get displayName => '豆包';
 
   @override
   bool get needsLocalModel => false;
@@ -32,8 +29,7 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
       throw StateError('音频文件不存在: $audioPath');
     }
     final request = http.MultipartRequest('POST', uri)
-      ..files.add(await http.MultipartFile.fromPath('audio', audioPath))
-      ..fields['engine'] = engine;
+      ..files.add(await http.MultipartFile.fromPath('audio', audioPath));
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);

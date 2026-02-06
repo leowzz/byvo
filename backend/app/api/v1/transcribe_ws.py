@@ -73,12 +73,10 @@ async def _run_asr_and_correction(
                     history = "\n".join(stable_history[-3:]) if stable_history else ""
                     corrected = await ark_correction.correct_full(snapshot, history=history)
                     await _safe_send_json(ws, {"text": corrected, "is_final": False})
-                    logger.debug(f"{corrected=}")
                     if asr_done:
                         stable_history.append(corrected)
                 else:
                     await _safe_send_json(ws, {"text": snapshot, "is_final": False})
-                    logger.debug(f"{snapshot=}")
                 last_sent = snapshot
             except Exception as e:
                 logger.warning(f"correction error: {e=}")
@@ -103,21 +101,12 @@ async def _run_asr_and_correction(
 
 
 @router.websocket("/transcribe/stream")
-async def transcribe_stream(
-    ws: WebSocket,
-    engine: str = Query("volcengine", description="仅支持 volcengine"),
-) -> None:
+async def transcribe_stream(ws: WebSocket) -> None:
     """
-    WebSocket 流式转写。
-
-    客户端发送二进制 PCM（16k/16bit/mono），服务端返回 JSON
+    豆包流式转写。客户端发送二进制 PCM（16k/16bit/mono），服务端返回
     ``{ "text": "当前全文（ASR 或纠错后）", "is_final": false }``。
-    若配置了 Ark（ark_api_key + ark_model_id），则按 500ms 窗口对 ASR 结果做实时纠错后下发。
+    若配置 Ark，则按 500ms 窗口做实时纠错后下发。
     """
-    if engine != "volcengine":
-        await ws.close(code=4000, reason=f"不支持的引擎: {engine}")
-        return
-
     await ws.accept()
     audio_stream = _audio_stream_from_ws(ws)
     logger.info("transcribe stream ws connected (correction=%s)", settings.volcengine.ark_valid)

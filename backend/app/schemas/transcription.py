@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class TranscribeResult(BaseModel):
-    """服务层转写结果，供 sensevoice/volcengine 统一返回。"""
+    """服务层转写结果，供豆包等引擎统一返回。"""
 
     text: str = Field("", description="转写文本")
     emotion: str | None = Field(None, description="情感标签")

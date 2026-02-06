@@ -1,36 +1,27 @@
-"""转写 API：POST /api/v1/transcribe。"""
+"""转写 API：POST /api/v1/transcribe，豆包 ASR。"""
 
 import asyncio
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.transcription import TranscriptionRecord
 from app.schemas.transcription import TranscribeResponse
-from app.services import sensevoice, volcengine
+from app.services import volcengine
 
 router = APIRouter()
-
-ENGINES = ("sensevoice", "volcengine")
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
     audio: UploadFile = File(...),
-    engine: str = Form("volcengine"),
     db: Session = Depends(get_db),
 ) -> TranscribeResponse:
-    """
-    上传 WAV 音频，使用指定引擎转写，结果持久化后返回。
-    engine: sensevoice | volcengine
-    """
-    if engine not in ENGINES:
-        raise HTTPException(status_code=400, detail=f"不支持的引擎: {engine}")
-
+    """上传 WAV 音频，豆包转写，结果持久化后返回。"""
     if not audio.filename or not audio.filename.lower().endswith((".wav", ".wave")):
         raise HTTPException(status_code=400, detail="仅支持 WAV 格式")
 
@@ -48,18 +39,12 @@ async def transcribe(
     try:
         loop = asyncio.get_running_loop()
         start = loop.time()
-        if engine == "volcengine":
-            result = await volcengine.transcribe_volcengine(tmp_path)
-        else:
-            result = await asyncio.to_thread(
-                sensevoice.transcribe_sensevoice, tmp_path
-            )
-
+        result = await volcengine.transcribe_volcengine(tmp_path)
         elapsed = loop.time() - start
-        logger.info(f"{engine=} {elapsed=:.2f}s {len(result.text)=}")
+        logger.info(f"volcengine {elapsed=:.2f}s {len(result.text)=}")
 
         record = TranscriptionRecord(
-            engine=engine,
+            engine="volcengine",
             text=result.text,
             emotion=result.emotion,
             event=result.event,
