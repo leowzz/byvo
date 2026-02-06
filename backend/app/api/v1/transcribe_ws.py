@@ -21,6 +21,14 @@ async def _audio_stream_from_ws(ws: WebSocket) -> AsyncIterator[bytes]:
         pass
 
 
+async def _safe_send_json(ws: WebSocket, payload: dict) -> None:
+    """发送 JSON，若连接已关闭则忽略，避免 ASGI 'send after close'。"""
+    try:
+        await ws.send_json(payload)
+    except (RuntimeError, WebSocketDisconnect, Exception):
+        pass
+
+
 @router.websocket("/transcribe/stream")
 async def transcribe_stream(
     ws: WebSocket,
@@ -44,13 +52,13 @@ async def transcribe_stream(
             _audio_stream_from_ws(ws),
         ):
             if incremental:
-                await ws.send_json({"text": incremental, "is_final": False})
-        await ws.send_json({"text": "", "is_final": True})
+                await _safe_send_json(ws, {"text": incremental, "is_final": False})
+        await _safe_send_json(ws, {"text": "", "is_final": True})
     except (WebSocketDisconnect, RuntimeError) as e:
         logger.debug(f"stream ws closed: {e=}")
     except Exception as e:
         logger.warning(f"stream error: {e=}")
-        await ws.send_json({"text": "", "is_final": True, "error": str(e)})
+        await _safe_send_json(ws, {"text": "", "is_final": True, "error": str(e)})
     finally:
         try:
             await ws.close()

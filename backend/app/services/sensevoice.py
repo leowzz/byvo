@@ -1,5 +1,6 @@
 """SenseVoice（Sherpa-ONNX）本地推理服务。"""
 
+import os
 from pathlib import Path
 
 import soundfile as sf
@@ -7,6 +8,27 @@ from loguru import logger
 
 from app.config import BASE_DIR, settings
 from app.schemas.transcription import TranscribeResult
+
+
+def _ensure_sherpa_onnx_dll_path() -> None:
+    """
+    Windows 下优先加载 sherpa_onnx 自带的 onnxruntime，避免使用系统目录的旧版
+    (API 1/17)，导致「requested API version [23] not available」崩溃。
+    """
+    if os.name != "nt":
+        return
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("sherpa_onnx")
+        if spec is None or spec.origin is None:
+            return
+        pkg_dir = os.path.dirname(spec.origin)
+        for sub in ("", "lib"):
+            d = os.path.join(pkg_dir, sub)
+            if os.path.isdir(d):
+                os.add_dll_directory(d)
+    except Exception:
+        pass
 
 
 def _extract_result(result: object) -> TranscribeResult:
@@ -32,6 +54,7 @@ def _extract_result(result: object) -> TranscribeResult:
 
 def transcribe_sensevoice(audio_path: str | Path) -> TranscribeResult:
     """使用 SenseVoice 转写音频。"""
+    _ensure_sherpa_onnx_dll_path()
     import sherpa_onnx  # 延迟导入，避免启动时 DLL 加载失败
 
     model_dir = BASE_DIR / Path(settings.sensevoice_model_dir)
