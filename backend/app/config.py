@@ -16,15 +16,21 @@ _CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
 
 
 class VolcengineConfig(BaseModel):
-    """豆包 API 凭证。"""
+    """豆包 ASR + 火山方舟 Ark（纠错）凭证。"""
 
-    app_key: str = Field(default="", description="X-Api-App-Key")
-    access_key: str = Field(default="", description="X-Api-Access-Key")
-    resource_id: str = Field(default="volc.seedasr.sauc.duration", description="X-Api-Resource-Id")
+    app_key: str = Field(default="", description="ASR X-Api-App-Key")
+    access_key: str = Field(default="", description="ASR X-Api-Access-Key")
+    resource_id: str = Field(default="volc.seedasr.sauc.duration", description="ASR X-Api-Resource-Id")
+    ark_api_key: str = Field(default="", description="火山方舟 Ark API Key（纠错）")
+    ark_model_id: str = Field(default="doubao-seed-1-8-251228", description="Ark 模型 ID，如 doubao-seed-1-8-251228")
 
     @property
     def valid(self) -> bool:
         return bool(self.app_key and self.access_key and self.resource_id)
+
+    @property
+    def ark_valid(self) -> bool:
+        return bool(self.ark_api_key and self.ark_model_id)
 
 
 class Settings(BaseSettings):

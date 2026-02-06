@@ -6,5 +6,8 @@ volcengine:
   app_key: ""
   access_key: ""
   resource_id: "volc.seedasr.sauc.duration"
+  # 火山方舟 Ark：流式纠错（Typeless 风格），需在控制台创建 API Key 与模型接入
+  ark_api_key: ""
+  ark_model_id: "doubao-seed-1-8-251228"
 
 sensevoice_model_dir: ./models/sensevoice
