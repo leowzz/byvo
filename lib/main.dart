@@ -437,7 +437,7 @@ class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
               controller: _urlController,
               decoration: const InputDecoration(
                 labelText: '后端 Base URL',
-                hintText: 'http://10.0.2.2:8000 (Android 模拟器)',
+                hintText: 'http://192.168.177.20:8000 (Android 模拟器)',
               ),
               keyboardType: TextInputType.url,
             ),
