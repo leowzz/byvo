@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../config/backend_config.dart';
+import '../debug_log.dart';
 import 'transcription_engine.dart';
 import 'transcription_result.dart';
 
@@ -28,23 +29,33 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     if (!await file.exists()) {
       throw StateError('音频文件不存在: $audioPath');
     }
+    DebugLog.instance.logApi('转写', 'POST $uri');
     final request = http.MultipartRequest('POST', uri)
       ..files.add(await http.MultipartFile.fromPath('audio', audioPath));
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
+    final body = response.body;
 
     if (response.statusCode != 200) {
-      final body = response.body;
+      DebugLog.instance.logApi('转写', '${response.statusCode} $body');
       throw Exception('后端转写失败: ${response.statusCode} $body');
     }
 
-    final json = _parseJson(response.body);
+    final json = _parseJson(body);
+    final text = json['text'] as String? ?? '';
+    final emotion = json['emotion'] as String?;
+    final event = json['event'] as String?;
+    final lang = json['lang'] as String?;
+    DebugLog.instance.logApi(
+      '转写',
+      '200 OK | text=${text.length}字 emotion=$emotion event=$event lang=$lang',
+    );
     return TranscriptionResult(
-      text: json['text'] as String? ?? '',
-      emotion: json['emotion'] as String?,
-      event: json['event'] as String?,
-      lang: json['lang'] as String?,
+      text: text,
+      emotion: emotion,
+      event: event,
+      lang: lang,
     );
   }
 

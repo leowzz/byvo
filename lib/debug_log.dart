@@ -1,0 +1,41 @@
+import 'dart:async';
+
+/// 全局调试日志，流式输出供 UI 展示。
+///
+/// 仅在 debug 模式下使用；release 下可空实现。
+class DebugLog {
+  DebugLog._();
+
+  static final DebugLog _instance = DebugLog._();
+  static DebugLog get instance => _instance;
+
+  final List<String> _lines = [];
+  final StreamController<String> _controller = StreamController<String>.broadcast();
+
+  /// 当前全部日志行（只读副本）。
+  List<String> get lines => List<String>.unmodifiable(_lines);
+
+  /// 新增日志行流。
+  Stream<String> get stream => _controller.stream;
+
+  /// 追加一条日志（带时间戳），并推送到流。
+  void log(String message) {
+    final line = '${DateTime.now().toIso8601String().substring(11, 23)} $message';
+    _lines.add(line);
+    _controller.add(line);
+  }
+
+  /// 打点 API 关键信息：请求/响应摘要，便于在调试窗实时查看。
+  void logApi(String tag, String summary) {
+    log('[$tag] $summary');
+  }
+
+  /// 清空日志（可选：同时通知 UI 刷新）。
+  void clear() {
+    _lines.clear();
+  }
+
+  void dispose() {
+    _controller.close();
+  }
+}

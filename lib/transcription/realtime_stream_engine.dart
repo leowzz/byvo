@@ -6,6 +6,7 @@ import 'package:record/record.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/backend_config.dart';
+import '../debug_log.dart';
 
 /// 实时流式转写：record.startStream + WebSocket 推送 PCM 到后端。
 ///
@@ -36,8 +37,10 @@ class RealtimeStreamEngine {
     _recorder = AudioRecorder();
     _stopping = false;
 
+    DebugLog.instance.logApi('实时', 'WS connect $uri');
     _channel = WebSocketChannel.connect(uri);
     await _channel!.ready;
+    DebugLog.instance.logApi('实时', 'WS connected');
 
     final stream = await _recorder!.startStream(
       const RecordConfig(
@@ -76,11 +79,21 @@ class RealtimeStreamEngine {
         try {
           final json = jsonDecode(message) as Map<String, dynamic>;
           final text = json['text'] as String?;
-          if (text != null) _textController.add(text);
-        } catch (_) {}
+          if (text != null) {
+            DebugLog.instance.logApi('实时', '<- text: ${text.length}字 "${_truncate(text, 40)}"');
+            _textController.add(text);
+          } else {
+            DebugLog.instance.logApi('实时', '<- $message');
+          }
+        } catch (_) {
+          DebugLog.instance.logApi('实时', '<- raw $message');
+        }
       },
-      onDone: () {},
+      onDone: () {
+        DebugLog.instance.logApi('实时', 'WS closed');
+      },
       onError: (e) {
+        DebugLog.instance.logApi('实时', 'error $e');
         if (!_textController.isClosed) {
           _textController.addError(e);
         }
@@ -88,8 +101,14 @@ class RealtimeStreamEngine {
     );
   }
 
+  static String _truncate(String s, int maxLen) {
+    if (s.length <= maxLen) return s;
+    return '${s.substring(0, maxLen)}…';
+  }
+
   /// 停止转写，关闭录音与 WebSocket。
   Future<void> stop() async {
+    DebugLog.instance.logApi('实时', 'stop');
     _stopping = true;
     await _recordSub?.cancel();
     await _recorder?.stop();
