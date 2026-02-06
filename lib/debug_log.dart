@@ -18,10 +18,10 @@ class DebugLog {
   /// 新增日志行流。
   Stream<String> get stream => _controller.stream;
 
-  /// 追加一条日志（带时间戳），并推送到流。
+  /// 追加一条日志（带时间戳），并推送到流。最新一条在列表首位（倒序展示）。
   void log(String message) {
     final line = '${DateTime.now().toIso8601String().substring(11, 23)} $message';
-    _lines.add(line);
+    _lines.insert(0, line);
     _controller.add(line);
   }
 

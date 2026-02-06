@@ -327,11 +327,11 @@ class _DebugLogPanelState extends State<_DebugLogPanel> {
     _lines = List<String>.from(DebugLog.instance.lines);
     _sub = DebugLog.instance.stream.listen((String line) {
       if (!mounted) return;
-      setState(() => _lines.add(line));
+      setState(() => _lines.insert(0, line));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
+            0,
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeOut,
           );
