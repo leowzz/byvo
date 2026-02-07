@@ -31,6 +31,21 @@ Future<void> saveEffectTranscribe(bool value) async {
   await prefs.setBool(_keyEffectTranscribe, value);
 }
 
+const String _keyIdleTimeoutSec = 'transcribe_idle_timeout_sec';
+
+/// 无新识别内容超过该秒数则断开连接（默认 30）。
+Future<int> loadIdleTimeoutSec() async {
+  final prefs = await SharedPreferences.getInstance();
+  final v = prefs.getInt(_keyIdleTimeoutSec);
+  return v ?? 30;
+}
+
+/// 保存无文本断开秒数。
+Future<void> saveIdleTimeoutSec(int value) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setInt(_keyIdleTimeoutSec, value);
+}
+
 /// 将 HTTP(S) base URL 转为 WebSocket URL。
 String backendUrlToWebSocket(String baseUrl) {
   if (baseUrl.startsWith('https://')) {

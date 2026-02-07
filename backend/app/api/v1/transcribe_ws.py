@@ -114,10 +114,15 @@ async def _run_stream_pipeline(
             pass
 
 
+IDLE_TIMEOUT_MIN = 1
+IDLE_TIMEOUT_MAX = 600
+
+
 @router.websocket("/transcribe/stream")
 async def transcribe_stream(
     ws: WebSocket,
     effect: bool = Query(False, description="是否开启效果转写/去口语化"),
+    idle_timeout_sec: int | None = Query(None, description="无新识别内容超过该秒数则关闭，不传则用服务端配置"),
 ) -> None:
     """
     豆包流式转写。客户端发送 PCM（16k/16bit/mono），服务端返回
@@ -126,8 +131,12 @@ async def transcribe_stream(
     await ws.accept()
     logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=}")
 
-    idle_timeout = float(settings.transcribe_ws_idle_timeout_sec)
-    logger.info(f"transcribe ws idle timeout: {idle_timeout}s")
+    if idle_timeout_sec is not None:
+        idle_timeout = float(min(max(idle_timeout_sec, IDLE_TIMEOUT_MIN), IDLE_TIMEOUT_MAX))
+        logger.info(f"transcribe ws idle timeout from client: {idle_timeout}s")
+    else:
+        idle_timeout = float(settings.transcribe_ws_idle_timeout_sec)
+        logger.info(f"transcribe ws idle timeout from config: {idle_timeout}s")
     try:
         await _run_stream_pipeline(
             ws, _audio_stream_from_ws(ws), effect=effect, idle_timeout_sec=idle_timeout

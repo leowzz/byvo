@@ -77,6 +77,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
 
   bool _showFloatingBall = false;
   bool _effectTranscribe = false;
+  int _idleTimeoutSec = 30;
 
   @override
   void initState() {
@@ -84,6 +85,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     WidgetsBinding.instance.addObserver(this);
     _loadShowFloatingBall();
     _loadEffectTranscribe();
+    _loadIdleTimeoutSec();
   }
 
   @override
@@ -101,6 +103,11 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   Future<void> _loadEffectTranscribe() async {
     final value = await loadEffectTranscribe();
     if (mounted) setState(() => _effectTranscribe = value);
+  }
+
+  Future<void> _loadIdleTimeoutSec() async {
+    final value = await loadIdleTimeoutSec();
+    if (mounted) setState(() => _idleTimeoutSec = value);
   }
 
   Future<void> _loadShowFloatingBall() async {
@@ -242,7 +249,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final engine = RealtimeStreamEngine();
     _realtimeStreamEngine = engine;
     try {
-      await engine.start(effect: _effectTranscribe);
+      await engine.start(effect: _effectTranscribe, idleTimeoutSec: _idleTimeoutSec);
       if (!mounted || !_isRealtimeTranscribing) return;
       _safeSetState(() => _isRecording = true);
       _realtimeTextSub = engine.textStream.listen((String text) {
@@ -409,6 +416,38 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                   setState(() => _effectTranscribe = v);
                   await saveEffectTranscribe(v);
                 },
+              ),
+            ),
+            ListTile(
+              title: const Text('无文本断开(秒)'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove),
+                    onPressed: _idleTimeoutSec <= 1
+                        ? null
+                        : () async {
+                            final v = (_idleTimeoutSec - 1).clamp(1, 300);
+                            setState(() => _idleTimeoutSec = v);
+                            await saveIdleTimeoutSec(v);
+                          },
+                  ),
+                  SizedBox(
+                    width: 36,
+                    child: Text('$_idleTimeoutSec', textAlign: TextAlign.center),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: _idleTimeoutSec >= 300
+                        ? null
+                        : () async {
+                            final v = (_idleTimeoutSec + 1).clamp(1, 300);
+                            setState(() => _idleTimeoutSec = v);
+                            await saveIdleTimeoutSec(v);
+                          },
+                  ),
+                ],
               ),
             ),
           ],
@@ -708,10 +747,11 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     if (!await _recorder.hasPermission()) return;
     setState(() => _isActive = true);
     final effect = await loadEffectTranscribe();
+    final idleSec = await loadIdleTimeoutSec();
     final engine = RealtimeStreamEngine();
     _engine = engine;
     try {
-      await engine.start(effect: effect);
+      await engine.start(effect: effect, idleTimeoutSec: idleSec);
       if (!mounted || !_isActive) return;
       _textSub = engine.textStream.listen((_) {});
       _closedSub = engine.connectionClosedStream.listen((_) {
