@@ -44,13 +44,21 @@ class RealtimeStreamEngine {
   /// 开始流式转写，连接后端 WS 并开始录音。
   ///
   /// [effect] 是否开启效果转写（去口语化/语义顺滑）。
+  /// [useLlm] 是否启用 LLM 纠错，由后端配置决定；开启「LLM处理」开关时传 true。
   /// [idleTimeoutSec] 无新识别内容超过该秒数则断开；不传则用服务端配置。
-  Future<void> start({bool effect = false, int? idleTimeoutSec}) async {
+  Future<void> start({
+    bool effect = false,
+    bool useLlm = false,
+    int? idleTimeoutSec,
+  }) async {
     if (_recorder != null) return;
 
     final baseUrl = await loadBackendUrl();
     final wsUrl = backendUrlToWebSocket(baseUrl);
-    final params = <String, String>{'effect': effect ? 'true' : 'false'};
+    final params = <String, String>{
+      'effect': effect ? 'true' : 'false',
+      'use_llm': useLlm ? 'true' : 'false',
+    };
     if (idleTimeoutSec != null && idleTimeoutSec > 0) {
       params['idle_timeout_sec'] = idleTimeoutSec.toString();
     }

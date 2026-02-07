@@ -15,9 +15,11 @@ abstract class TranscriptionEngine {
   ///
   /// [modelSource] 为模型来源：本地时为模型目录路径；远程 API 时可为 null 或由实现忽略。
   /// [effect] 是否开启效果转写（去口语化/语义顺滑），仅后端豆包等支持时有效。
+  /// [useLlm] 是否启用 LLM 纠错，由后端配置决定；开启「LLM处理」开关时传 true。
   Future<TranscriptionResult> transcribe(
     String audioPath, {
     String? modelSource,
     bool effect = false,
+    bool useLlm = false,
   });
 }

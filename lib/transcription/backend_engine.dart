@@ -23,10 +23,14 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     String audioPath, {
     String? modelSource,
     bool effect = false,
+    bool useLlm = false,
   }) async {
     final baseUrl = await loadBackendUrl();
     final uri = Uri.parse('$baseUrl/api/v1/transcribe').replace(
-      queryParameters: <String, String>{'effect': effect ? 'true' : 'false'},
+      queryParameters: <String, String>{
+        'effect': effect ? 'true' : 'false',
+        'use_llm': useLlm ? 'true' : 'false',
+      },
     );
     final file = File(audioPath);
     if (!await file.exists()) {

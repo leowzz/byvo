@@ -1,4 +1,4 @@
-"""转写 API：POST /api/v1/transcribe，豆包 ASR。"""
+"""转写 API：POST /api/v1/transcribe，豆包 ASR，可选 Ark 纠错。"""
 
 import asyncio
 import tempfile
@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models.transcription import TranscriptionRecord
 from app.schemas.transcription import TranscribeResponse
-from app.services import volcengine
+from app.services import ark_correction, volcengine
 
 router = APIRouter()
 
@@ -20,9 +21,10 @@ router = APIRouter()
 async def transcribe(
     audio: UploadFile = File(...),
     effect: bool = Query(False, description="是否开启效果转写/去口语化（语义顺滑）"),
+    use_llm: bool = Query(False, description="是否启用 LLM 纠错，由后端配置决定"),
     db: Session = Depends(get_db),
 ) -> TranscribeResponse:
-    """上传 WAV 音频，豆包转写，结果持久化后返回。"""
+    """上传 WAV 音频，豆包转写；use_llm 且 Ark 配置有效时做纠错，结果持久化后返回。"""
     if not audio.filename or not audio.filename.lower().endswith((".wav", ".wave")):
         raise HTTPException(status_code=400, detail="仅支持 WAV 格式")
 
@@ -44,9 +46,14 @@ async def transcribe(
         elapsed = loop.time() - start
         logger.info(f"volcengine {elapsed=:.2f}s {len(result.text)=}")
 
+        final_text = result.text
+        if use_llm and settings.volcengine.ark_valid:
+            final_text = await ark_correction.correct_full(result.text, history="")
+            logger.info(f"Ark 纠错后 len(final_text)={len(final_text)}")
+
         record = TranscriptionRecord(
             engine="volcengine",
-            text=result.text,
+            text=final_text,
             emotion=result.emotion,
             event=result.event,
             lang=result.lang,

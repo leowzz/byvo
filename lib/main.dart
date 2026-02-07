@@ -220,6 +220,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       final TranscriptionResult result = await _engine.transcribe(
         _audioPath!,
         effect: _effectTranscribe,
+        useLlm: _effectTranscribe,
       );
       _safeSetState(() {
         _isTranscribing = false;
@@ -249,7 +250,11 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final engine = RealtimeStreamEngine();
     _realtimeStreamEngine = engine;
     try {
-      await engine.start(effect: _effectTranscribe, idleTimeoutSec: _idleTimeoutSec);
+      await engine.start(
+        effect: _effectTranscribe,
+        useLlm: _effectTranscribe,
+        idleTimeoutSec: _idleTimeoutSec,
+      );
       if (!mounted || !_isRealtimeTranscribing) return;
       _safeSetState(() => _isRecording = true);
       _realtimeTextSub = engine.textStream.listen((String text) {
@@ -751,7 +756,11 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     final engine = RealtimeStreamEngine();
     _engine = engine;
     try {
-      await engine.start(effect: effect, idleTimeoutSec: idleSec);
+      await engine.start(
+        effect: effect,
+        useLlm: effect,
+        idleTimeoutSec: idleSec,
+      );
       if (!mounted || !_isActive) return;
       _textSub = engine.textStream.listen((_) {});
       _closedSub = engine.connectionClosedStream.listen((_) {
