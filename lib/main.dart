@@ -79,6 +79,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   bool _effectTranscribe = false;
   int _idleTimeoutSec = 30;
 
+  /// 长按录音按钮按下时间，用于松手后判断是否达到最短时长再转写。
+  DateTime? _holdRecordStartTime;
+  static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
+
   @override
   void initState() {
     super.initState();
@@ -199,6 +203,26 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
     });
     if (path != null) _transcribe(context);
+  }
+
+  /// 长按录音松手：停止录音，若时长达到 [_holdRecordMinDuration] 则上传并调用转写接口。
+  Future<void> _stopHoldAndTranscribe(BuildContext? context) async {
+    if (!_isRecording || _holdRecordStartTime == null) return;
+    final DateTime startTime = _holdRecordStartTime!;
+    _holdRecordStartTime = null;
+    final String? path = await _recorder.stop();
+    _safeSetState(() => _isRecording = false);
+    if (path == null) return;
+    final Duration duration = DateTime.now().difference(startTime);
+    if (duration < _holdRecordMinDuration) {
+      _safeSetState(() => _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms');
+      return;
+    }
+    _safeSetState(() {
+      _audioPath = path;
+      _error = null;
+    });
+    await _transcribe(context);
   }
 
   Future<void> _transcribe(BuildContext? context) async {
@@ -492,6 +516,43 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                                     : _startRecording,
                             icon: Icon(_isRealtimeTranscribing ? Icons.mic : (_isRecording ? Icons.stop : Icons.mic)),
                             label: Text(_isRealtimeTranscribing ? '录制' : (_isRecording ? '停止录制' : '录制')),
+                          ),
+                          GestureDetector(
+                            onPanDown: (_) {
+                              if (_isTranscribing || _isRealtimeTranscribing || _isRecording) return;
+                              _holdRecordStartTime = DateTime.now();
+                              _startRecording();
+                            },
+                            onPanEnd: (_) => _stopHoldAndTranscribe(context),
+                            onPanCancel: () => _stopHoldAndTranscribe(context),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _holdRecordStartTime != null
+                                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                        : Theme.of(context).colorScheme.primaryContainer,
+                                  ),
+                                  child: Icon(
+                                    _holdRecordStartTime != null ? Icons.stop : Icons.mic_none,
+                                    color: _holdRecordStartTime != null
+                                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                                        : Theme.of(context).colorScheme.onPrimaryContainer,
+                                    size: 28,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '长按录音转写',
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ],
+                            ),
                           ),
                           FilledButton.icon(
                             onPressed: _isRealtimeTranscribing
