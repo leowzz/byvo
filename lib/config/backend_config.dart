@@ -1,9 +1,9 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 后端 API 地址，默认 Android 模拟器可用 10.0.2.2:8000
+/// 后端 API 地址
 const String _keyBackendUrl = 'backend_url';
 
-const String kDefaultBackendUrl = 'http://10.0.2.2:8000';
+const String kDefaultBackendUrl = 'http://192.168.177.102:8000';
 
 /// 从 SharedPreferences 读取后端 base URL。
 Future<String> loadBackendUrl() async {
