@@ -28,111 +28,145 @@ async def _audio_stream_from_ws(ws: WebSocket) -> AsyncIterator[bytes]:
 
 async def _send_json(ws: WebSocket, payload: dict) -> None:
     try:
+        logger.debug(f"[send] {payload}")
         await ws.send_json(payload)
-    except (RuntimeError, WebSocketDisconnect, Exception):
-        pass
+    except Exception as e:
+        logger.debug(f"[send] error: {e=}")
 
 
-async def _run_stream_pipeline(
-    ws: WebSocket,
-    audio_stream: AsyncIterator[bytes],
-    *,
-    effect: bool = False,
-    idle_timeout_sec: float = 5.0,
-) -> None:
+class TranscribeStreamPipeline:
     """
     ASR 流 + 可选纠错；超过 idle_timeout_sec 无新识别内容则发送 closed 并结束。
+    共享状态用实例属性维护，避免 nonlocal。
     """
-    current_asr = ""
-    asr_done = False
-    last_sent = ""
-    stable_history: list[str] = []
-    use_correction = settings.volcengine.ark_valid and effect
-    loop = asyncio.get_running_loop()
-    last_speech_at: float = loop.time()  # 上次有识别内容的时间（按内容判断）；有下发文本时刷新
-    last_asr_update_at: float = loop.time()  # 上次 ASR 产出新内容的时间；用于空闲判断，避免因发送间隔误判
-    idle_timeout_requested = asyncio.Event()
 
-    async def consume_asr() -> None:
-        nonlocal current_asr, asr_done, last_asr_update_at
+    def __init__(
+        self,
+        ws: WebSocket,
+        audio_stream: AsyncIterator[bytes],
+        *,
+        effect: bool = False,
+        idle_timeout_sec: float = 5.0,
+    ) -> None:
+        self.ws = ws
+        self.audio_stream = audio_stream
+        self.effect = effect
+        self.idle_timeout_sec = idle_timeout_sec
+        self.use_correction = settings.volcengine.ark_valid and effect
+        self._loop = asyncio.get_running_loop()
+
+        self.current_asr = ""
+        self.asr_done = False
+        self.last_sent = ""
+        self.stable_history: list[str] = []
+        self.last_speech_at: float = self._loop.time()
+        self.last_asr_update_at: float = self._loop.time()
+        self.idle_timeout_requested = asyncio.Event()
+
+        self._asr_task: asyncio.Task[None] | None = None
+        self._corr_task: asyncio.Task[None] | None = None
+        self._idle_task: asyncio.Task[None] | None = None
+
+    async def _consume_asr(self) -> None:
         try:
-            async for full_text in volcengine.transcribe_volcengine_stream(audio_stream, effect=effect):
-                current_asr = full_text
-                last_asr_update_at = loop.time()
+            async for full_text in volcengine.transcribe_volcengine_stream(
+                self.audio_stream, effect=self.effect
+            ):
+                self.current_asr = full_text
+                self.last_asr_update_at = self._loop.time()
         finally:
-            asr_done = True
+            self.asr_done = True
 
-    async def send_chunk(text: str, snap: str) -> None:
+    async def _send_chunk(self, text: str, snap: str) -> None:
         """发送一段文本并更新 last_sent / last_speech_at。"""
-        nonlocal last_sent, last_speech_at
-        await _send_json(ws, {"text": text, "is_final": False})
-        last_sent = snap
-        last_speech_at = loop.time()
+        await _send_json(self.ws, {"text": text, "is_final": False})
+        self.last_sent = snap
+        self.last_speech_at = self._loop.time()
 
-    async def correction_loop() -> None:
-        nonlocal last_sent, stable_history, last_speech_at
+    async def _correction_loop(self) -> None:
         while True:
-            if not idle_timeout_requested.is_set():
+            if not self.idle_timeout_requested.is_set():
                 await asyncio.sleep(CORRECTION_WINDOW_SEC)
-            snap = current_asr
-            done_or_closing = asr_done or idle_timeout_requested.is_set()
-            if not snap or snap == last_sent:
+            snap = self.current_asr
+            done_or_closing = self.asr_done or self.idle_timeout_requested.is_set()
+            if not snap or snap == self.last_sent:
                 if done_or_closing:
                     break
                 continue
             try:
-                if use_correction:
-                    history = "\n".join(stable_history[-3:]) if stable_history else ""
+                if self.use_correction:
+                    history = (
+                        "\n".join(self.stable_history[-3:]) if self.stable_history else ""
+                    )
                     text = await ark_correction.correct_full(snap, history=history)
-                    if asr_done:
-                        stable_history.append(text)
+                    if self.asr_done:
+                        self.stable_history.append(text)
                 else:
                     text = snap
-                await send_chunk(text, snap)
+                await self._send_chunk(text, snap)
             except Exception as e:
                 logger.warning(f"correction error: {e=}")
-                await send_chunk(snap, snap)
-            if idle_timeout_requested.is_set() or asr_done:
+                await self._send_chunk(snap, snap)
+            if self.idle_timeout_requested.is_set() or self.asr_done:
                 break
-        await _send_json(ws, {"text": last_sent or "", "is_final": True})
+        await _send_json(self.ws, {"text": self.last_sent or "", "is_final": True})
 
-    async def idle_check_loop() -> None:
-        check_interval = min(CHECK_INTERVAL_CAP_SEC, idle_timeout_sec)
+    async def _idle_check_loop(self) -> None:
+        check_interval = min(CHECK_INTERVAL_CAP_SEC, self.idle_timeout_sec)
         while True:
             await asyncio.sleep(check_interval)
-            if loop.time() - last_asr_update_at >= idle_timeout_sec:
-                logger.debug(f"transcribe ws idle timeout (no speech) after {idle_timeout_sec}s")
-                idle_timeout_requested.set()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(corr_task), timeout=CORR_WAIT_TIMEOUT_SEC
-                    )
-                except asyncio.TimeoutError:
-                    corr_task.cancel()
+            if self._loop.time() - self.last_asr_update_at >= self.idle_timeout_sec:
+                logger.debug(
+                    f"transcribe ws idle timeout (no speech) after {self.idle_timeout_sec}s"
+                )
+                self.idle_timeout_requested.set()
+                if self._corr_task is not None:
                     try:
-                        await corr_task
-                    except asyncio.CancelledError:
-                        pass
-                await _send_json(ws, {"closed": True, "reason": "idle_timeout"})
-                asr_task.cancel()
+                        await asyncio.wait_for(
+                            asyncio.shield(self._corr_task),
+                            timeout=CORR_WAIT_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        self._corr_task.cancel()
+                        try:
+                            await self._corr_task
+                        except asyncio.CancelledError:
+                            pass
+                await _send_json(
+                    self.ws, {"closed": True, "reason": "idle_timeout"}
+                )
+                if self._asr_task is not None:
+                    self._asr_task.cancel()
                 return
 
-    asr_task = asyncio.create_task(consume_asr())
-    corr_task = asyncio.create_task(correction_loop())
-    idle_task = asyncio.create_task(idle_check_loop())
-    try:
-        await asyncio.gather(asr_task, corr_task, idle_task)
-    except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
-        for t in (asr_task, corr_task, idle_task):
-            t.cancel()
-        await asyncio.gather(asr_task, corr_task, idle_task, return_exceptions=True)
+    async def run(self) -> None:
+        """启动 ASR、纠错、空闲检测三个协程并等待结束。"""
+        self._asr_task = asyncio.create_task(self._consume_asr())
+        self._corr_task = asyncio.create_task(self._correction_loop())
+        self._idle_task = asyncio.create_task(self._idle_check_loop())
+        try:
+            await asyncio.gather(
+                self._asr_task, self._corr_task, self._idle_task
+            )
+        except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+            for t in (self._asr_task, self._corr_task, self._idle_task):
+                if t is not None:
+                    t.cancel()
+            await asyncio.gather(
+                self._asr_task,
+                self._corr_task,
+                self._idle_task,
+                return_exceptions=True,
+            )
 
 
 @router.websocket("/transcribe/stream")
 async def transcribe_stream(
     ws: WebSocket,
     effect: bool = Query(False, description="是否开启效果转写/去口语化"),
-    idle_timeout_sec: int | None = Query(None, description="无新识别内容超过该秒数则关闭，不传则用服务端配置"),
+    idle_timeout_sec: int | None = Query(
+        None, description="无新识别内容超过该秒数则关闭，不传则用服务端配置"
+    ),
 ) -> None:
     """
     豆包流式转写。客户端发送 PCM（16k/16bit/mono），服务端返回
@@ -142,15 +176,21 @@ async def transcribe_stream(
     logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=}")
 
     if idle_timeout_sec is not None:
-        idle_timeout = float(min(max(idle_timeout_sec, IDLE_TIMEOUT_MIN), IDLE_TIMEOUT_MAX))
+        idle_timeout = float(
+            min(max(idle_timeout_sec, IDLE_TIMEOUT_MIN), IDLE_TIMEOUT_MAX)
+        )
         logger.info(f"transcribe ws idle timeout from client: {idle_timeout}s")
     else:
         idle_timeout = float(settings.transcribe_ws_idle_timeout_sec)
         logger.info(f"transcribe ws idle timeout from config: {idle_timeout}s")
     try:
-        await _run_stream_pipeline(
-            ws, _audio_stream_from_ws(ws), effect=effect, idle_timeout_sec=idle_timeout
+        pipeline = TranscribeStreamPipeline(
+            ws,
+            _audio_stream_from_ws(ws),
+            effect=effect,
+            idle_timeout_sec=idle_timeout,
         )
+        await pipeline.run()
     except (WebSocketDisconnect, RuntimeError) as e:
         logger.debug(f"stream ws closed: {e=}")
     except Exception as e:
