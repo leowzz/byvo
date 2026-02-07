@@ -57,7 +57,8 @@ class TranscribeStreamPipeline:
 
         self.current_asr = ""
         self.asr_done = False
-        self.last_sent = ""
+        self.last_sent = ""  # 上次已处理的 ASR snap，用于去重
+        self.last_sent_text = ""  # 上次实际下发给客户端的文本（纠错后），用于 is_final
         self.stable_history: list[str] = []
         self.last_speech_at: float = self._loop.time()
         self.last_asr_update_at: float = self._loop.time()
@@ -78,9 +79,10 @@ class TranscribeStreamPipeline:
             self.asr_done = True
 
     async def _send_chunk(self, text: str, snap: str) -> None:
-        """发送一段文本并更新 last_sent / last_speech_at。"""
+        """发送一段文本并更新 last_sent / last_sent_text / last_speech_at。"""
         await _send_json(self.ws, {"text": text, "is_final": False})
         self.last_sent = snap
+        self.last_sent_text = text
         self.last_speech_at = self._loop.time()
 
     async def _correction_loop(self) -> None:
@@ -109,7 +111,9 @@ class TranscribeStreamPipeline:
                 await self._send_chunk(snap, snap)
             if self.idle_timeout_requested.is_set() or self.asr_done:
                 break
-        await _send_json(self.ws, {"text": self.last_sent or "", "is_final": True})
+        await _send_json(
+            self.ws, {"text": self.last_sent_text or "", "is_final": True}
+        )
 
     async def _idle_check_loop(self) -> None:
         check_interval = min(CHECK_INTERVAL_CAP_SEC, self.idle_timeout_sec)
