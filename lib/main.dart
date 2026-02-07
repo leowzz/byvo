@@ -68,10 +68,12 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   String? _error;
   bool _isRecording = false;
   bool _isRealtimeTranscribing = false;
+  bool _realtimeConnectionClosed = false;
   String _realtimeText = '';
   final AudioRecorder _recorder = AudioRecorder();
   RealtimeStreamEngine? _realtimeStreamEngine;
   StreamSubscription<String>? _realtimeTextSub;
+  StreamSubscription<void>? _realtimeClosedSub;
 
   bool _showFloatingBall = false;
   bool _effectTranscribe = false;
@@ -233,6 +235,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     if (!await _requireMicPermission()) return;
     setState(() {
       _isRealtimeTranscribing = true;
+      _realtimeConnectionClosed = false;
       _realtimeText = '';
       _error = null;
     });
@@ -249,6 +252,18 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         if (kDebugMode) debugPrint('Realtime stream error: $e');
         _safeSetState(() => _error = e.toString());
       });
+      _realtimeClosedSub = engine.connectionClosedStream.listen((_) {
+        if (!mounted) return;
+        _realtimeTextSub?.cancel();
+        _realtimeTextSub = null;
+        _realtimeStreamEngine?.stop();
+        _realtimeStreamEngine = null;
+        _safeSetState(() {
+          _isRealtimeTranscribing = false;
+          _isRecording = false;
+          _realtimeConnectionClosed = true;
+        });
+      });
     } catch (e, st) {
       if (kDebugMode) debugPrint('Realtime stream start error: $e\n$st');
       _safeSetState(() => _error = e.toString());
@@ -263,6 +278,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   Future<void> _stopRealtimeTranscribe() async {
+    await _realtimeClosedSub?.cancel();
+    _realtimeClosedSub = null;
     await _realtimeTextSub?.cancel();
     await _realtimeStreamEngine?.stop();
     _realtimeStreamEngine = null;
@@ -270,6 +287,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _safeSetState(() {
       _isRealtimeTranscribing = false;
       _isRecording = false;
+      _realtimeConnectionClosed = true;
     });
   }
 
@@ -443,11 +461,15 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                       : const Icon(Icons.transcribe),
                   label: Text(_isTranscribing ? '转写中…' : '转写'),
                 ),
-                if (_realtimeText.isNotEmpty) ...[
+                if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
                   const SizedBox(height: 24),
                   const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  SelectableText(_realtimeText),
+                  if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
+                  if (_realtimeConnectionClosed) ...[
+                    if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
+                    Text('已关闭', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline)),
+                  ],
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 16),
@@ -665,12 +687,14 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   final AudioRecorder _recorder = AudioRecorder();
   RealtimeStreamEngine? _engine;
   StreamSubscription<String>? _textSub;
+  StreamSubscription<void>? _closedSub;
   Timer? _drainTimer;
   bool _isActive = false;
 
   @override
   void dispose() {
     _drainTimer?.cancel();
+    _closedSub?.cancel();
     _textSub?.cancel();
     _engine?.stop();
     super.dispose();
@@ -686,6 +710,10 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       await engine.start(effect: effect);
       if (!mounted || !_isActive) return;
       _textSub = engine.textStream.listen((_) {});
+      _closedSub = engine.connectionClosedStream.listen((_) {
+        if (!mounted || _engine != engine) return;
+        _stopRealtime();
+      });
     } catch (e) {
       if (mounted) setState(() => _isActive = false);
     }
@@ -706,6 +734,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   }
 
   Future<void> _stopRealtime() async {
+    await _closedSub?.cancel();
+    _closedSub = null;
     await _textSub?.cancel();
     await _engine?.stop();
     _engine = null;

@@ -21,12 +21,17 @@ class RealtimeStreamEngine {
   StreamSubscription<Uint8List>? _recordSub;
   StreamSubscription? _wsSub;
   final StreamController<String> _textController = StreamController<String>.broadcast();
+  final StreamController<void> _connectionClosedController = StreamController<void>.broadcast();
   bool _stopping = false;
+  bool _connectionClosedEmitted = false;
   DateTime? _lastAudioSentAt;
   DateTime? _lastResponseAt;
 
   /// 增量识别文本流。
   Stream<String> get textStream => _textController.stream;
+
+  /// 连接已关闭（服务端空闲超时或断开等），仅触发一次。
+  Stream<void> get connectionClosedStream => _connectionClosedController.stream;
 
   /// 是否已发送完毕：已连接且连续 1 秒无音频发送且 1 秒无服务端返回。
   bool get isDrainComplete {
@@ -90,12 +95,18 @@ class RealtimeStreamEngine {
       },
     );
 
+    _connectionClosedEmitted = false;
     _wsSub = _channel!.stream.listen(
       (message) {
         _lastResponseAt = DateTime.now();
         if (message is! String) return;
         try {
           final json = jsonDecode(message) as Map<String, dynamic>;
+          if (json['closed'] == true) {
+            DebugLog.instance.logApi('实时', '<- closed: ${json['reason']}');
+            _emitConnectionClosed();
+            return;
+          }
           final text = json['text'] as String?;
           if (text != null) {
             DebugLog.instance.logApi('实时', '<- text: ${text.length}字 "${_truncate(text, 40)}"');
@@ -109,6 +120,7 @@ class RealtimeStreamEngine {
       },
       onDone: () {
         DebugLog.instance.logApi('实时', 'WS closed');
+        _emitConnectionClosed();
       },
       onError: (e) {
         DebugLog.instance.logApi('实时', 'error $e');
@@ -122,6 +134,14 @@ class RealtimeStreamEngine {
   static String _truncate(String s, int maxLen) {
     if (s.length <= maxLen) return s;
     return '${s.substring(0, maxLen)}…';
+  }
+
+  void _emitConnectionClosed() {
+    if (_connectionClosedEmitted) return;
+    _connectionClosedEmitted = true;
+    if (!_connectionClosedController.isClosed) {
+      _connectionClosedController.add(null);
+    }
   }
 
   /// 停止转写，关闭录音与 WebSocket。
@@ -139,5 +159,6 @@ class RealtimeStreamEngine {
   /// 释放资源。
   void dispose() {
     _textController.close();
+    _connectionClosedController.close();
   }
 }

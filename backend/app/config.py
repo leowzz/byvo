@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="sqlite:///./byvo.db")
     volcengine: VolcengineConfig = Field(default_factory=VolcengineConfig)
+    transcribe_ws_idle_timeout_sec: int = Field(default=5, description="实时转写：无新识别内容超过该秒数则自动关闭连接")
 
     @classmethod
     def settings_customise_sources(
