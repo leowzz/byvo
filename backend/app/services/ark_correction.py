@@ -33,6 +33,7 @@ def _correct_stream_sync(asr_text: str, history: str, api_key: str, model_id: st
             ],
             stream=True,
             temperature=0.3,
+            thinking={"type": "disabled"},  # 关闭深度思考，降低延迟
         )
         for chunk in stream:
             if not chunk.choices:
