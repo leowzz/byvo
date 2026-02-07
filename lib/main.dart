@@ -425,10 +425,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                 children: [
                   IconButton(
                     icon: const Icon(Icons.remove),
-                    onPressed: _idleTimeoutSec <= 1
+                    onPressed: _idleTimeoutSec <= 0
                         ? null
                         : () async {
-                            final v = (_idleTimeoutSec - 1).clamp(1, 300);
+                            final v = (_idleTimeoutSec - 1).clamp(0, 300);
                             setState(() => _idleTimeoutSec = v);
                             await saveIdleTimeoutSec(v);
                           },
@@ -442,7 +442,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                     onPressed: _idleTimeoutSec >= 300
                         ? null
                         : () async {
-                            final v = (_idleTimeoutSec + 1).clamp(1, 300);
+                            final v = (_idleTimeoutSec + 1).clamp(0, 300);
                             setState(() => _idleTimeoutSec = v);
                             await saveIdleTimeoutSec(v);
                           },

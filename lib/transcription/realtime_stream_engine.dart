@@ -51,7 +51,7 @@ class RealtimeStreamEngine {
     final baseUrl = await loadBackendUrl();
     final wsUrl = backendUrlToWebSocket(baseUrl);
     final params = <String, String>{'effect': effect ? 'true' : 'false'};
-    if (idleTimeoutSec != null) {
+    if (idleTimeoutSec != null && idleTimeoutSec > 0) {
       params['idle_timeout_sec'] = idleTimeoutSec.toString();
     }
     final uri = Uri.parse('$wsUrl/api/v1/transcribe/stream').replace(
