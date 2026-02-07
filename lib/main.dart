@@ -127,7 +127,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
-  /// 若有上次保存的位置则用 startPosition 恢复，否则按 alignment 放到默认位置。
+  /// enableDrag: false 时触摸才能传到 Flutter，长按录音才可用；球不能拖动，需在应用内关掉再开可重定位。
   Future<void> _doShowGlobalOverlay() async {
     OverlayPosition? startPosition;
     final prefs = await SharedPreferences.getInstance();
@@ -140,9 +140,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       height: 180,
       width: 180,
       alignment: OverlayAlignment.centerRight,
-      enableDrag: true,
+      enableDrag: false,
       overlayTitle: 'byvo',
-      overlayContent: '长按转写',
+      overlayContent: '长按约 0.5 秒录音',
       startPosition: startPosition,
     );
   }
@@ -191,6 +191,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       path: path,
     );
     _safeSetState(() => _isRecording = true);
+    if (kDebugMode) debugPrint('[按钮] 录制=开始');
   }
 
   Future<void> _stopRecording(BuildContext context) async {
@@ -202,6 +203,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         _error = null;
       }
     });
+    if (kDebugMode) debugPrint('[按钮] 录制=停止 path=${path != null}');
     if (path != null) _transcribe(context);
   }
 
@@ -212,9 +214,11 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _holdRecordStartTime = null;
     final String? path = await _recorder.stop();
     _safeSetState(() => _isRecording = false);
+    if (kDebugMode) debugPrint('[按钮] 长按录音=松手 path=${path != null}');
     if (path == null) return;
     final Duration duration = DateTime.now().difference(startTime);
     if (duration < _holdRecordMinDuration) {
+      if (kDebugMode) debugPrint('[按钮] 长按录音=太短 ${duration.inMilliseconds}ms');
       _safeSetState(() => _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms');
       return;
     }
@@ -240,6 +244,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       _error = null;
       _result = null;
     });
+    if (kDebugMode) debugPrint('[按钮] 转写=开始');
     try {
       final TranscriptionResult result = await _engine.transcribe(
         _audioPath!,
@@ -250,12 +255,14 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         _isTranscribing = false;
         _result = result;
       });
+      if (kDebugMode) debugPrint('[按钮] 转写=完成');
     } catch (e, st) {
       if (kDebugMode) debugPrint('Transcribe error: $e\n$st');
       _safeSetState(() {
         _isTranscribing = false;
         _error = e.toString();
       });
+      if (kDebugMode) debugPrint('[按钮] 转写=失败');
       if (context != null && context.mounted) {
         _showErrorDialog(context, '转写失败', e.toString());
       }
@@ -271,6 +278,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       _realtimeText = '';
       _error = null;
     });
+    if (kDebugMode) debugPrint('[按钮] 实时转写=开始');
     final engine = RealtimeStreamEngine();
     _realtimeStreamEngine = engine;
     try {
@@ -281,6 +289,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       );
       if (!mounted || !_isRealtimeTranscribing) return;
       _safeSetState(() => _isRecording = true);
+      if (kDebugMode) debugPrint('[按钮] 实时转写=已连接(录制中)');
       _realtimeTextSub = engine.textStream.listen((String text) {
         if (!mounted || !_isRealtimeTranscribing) return;
         _safeSetState(() => _realtimeText = text);
@@ -299,6 +308,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
           _isRecording = false;
           _realtimeConnectionClosed = true;
         });
+        if (kDebugMode) debugPrint('[按钮] 实时转写=连接已关闭');
       });
     } catch (e, st) {
       if (kDebugMode) debugPrint('Realtime stream start error: $e\n$st');
@@ -307,6 +317,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         _isRealtimeTranscribing = false;
         _isRecording = false;
       });
+      if (kDebugMode) debugPrint('[按钮] 实时转写=启动失败');
       if (context.mounted) {
         _showErrorDialog(context, '实时转写连接失败', e.toString());
       }
@@ -325,6 +336,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       _isRecording = false;
       _realtimeConnectionClosed = true;
     });
+    if (kDebugMode) debugPrint('[按钮] 实时转写=已停止');
   }
 
   Future<void> _openBackendSettings(BuildContext context) async {
@@ -511,16 +523,27 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                           FilledButton.icon(
                             onPressed: _isTranscribing || _isRealtimeTranscribing
                                 ? null
-                                : _isRecording
-                                    ? () => _stopRecording(context)
-                                    : _startRecording,
-                            icon: Icon(_isRealtimeTranscribing ? Icons.mic : (_isRecording ? Icons.stop : Icons.mic)),
-                            label: Text(_isRealtimeTranscribing ? '录制' : (_isRecording ? '停止录制' : '录制')),
+                                : (_holdRecordStartTime != null
+                                    ? null
+                                    : _isRecording
+                                        ? () => _stopRecording(context)
+                                        : _startRecording),
+                            icon: Icon(
+                              _isRealtimeTranscribing
+                                  ? Icons.mic
+                                  : (_isRecording && _holdRecordStartTime == null ? Icons.stop : Icons.mic),
+                            ),
+                            label: Text(
+                              _isRealtimeTranscribing
+                                  ? '录制'
+                                  : (_isRecording && _holdRecordStartTime == null ? '停止录制' : '录制'),
+                            ),
                           ),
                           GestureDetector(
                             onPanDown: (_) {
                               if (_isTranscribing || _isRealtimeTranscribing || _isRecording) return;
                               _holdRecordStartTime = DateTime.now();
+                              if (kDebugMode) debugPrint('[按钮] 长按录音=按下');
                               _startRecording();
                             },
                             onPanEnd: (_) => _stopHoldAndTranscribe(context),
@@ -784,7 +807,8 @@ void overlayMain() {
   ));
 }
 
-/// 全局悬浮窗内的球：长按开始实时转写，松手后等发送完毕再关闭。
+/// 全局悬浮窗内的球：与主页面「长按录音转写」一致，长按录音、松手停止并调用 POST 转写接口。
+/// 不调用 resizeOverlay（插件会把 180 当 dp 转成像素，球会突然变大）。拖拽仍由原生 enableDrag 处理。
 class OverlayBallPage extends StatefulWidget {
   const OverlayBallPage({super.key});
 
@@ -794,94 +818,72 @@ class OverlayBallPage extends StatefulWidget {
 
 class _OverlayBallPageState extends State<OverlayBallPage> {
   final AudioRecorder _recorder = AudioRecorder();
-  RealtimeStreamEngine? _engine;
-  StreamSubscription<String>? _textSub;
-  StreamSubscription<void>? _closedSub;
-  Timer? _drainTimer;
-  bool _isActive = false;
+  static const BackendTranscriptionEngine _engine = BackendTranscriptionEngine();
+  static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
+  DateTime? _holdRecordStartTime;
 
-  @override
-  void dispose() {
-    _drainTimer?.cancel();
-    _closedSub?.cancel();
-    _textSub?.cancel();
-    _engine?.stop();
-    super.dispose();
-  }
-
-  Future<void> _startRealtime() async {
-    if (!await _recorder.hasPermission()) return;
-    setState(() => _isActive = true);
-    final effect = await loadEffectTranscribe();
-    final idleSec = await loadIdleTimeoutSec();
-    final engine = RealtimeStreamEngine();
-    _engine = engine;
+  Future<void> _startHoldRecord() async {
     try {
-      await engine.start(
-        effect: effect,
-        useLlm: effect,
-        idleTimeoutSec: idleSec,
-      );
-      if (!mounted || !_isActive) return;
-      _textSub = engine.textStream.listen((_) {});
-      _closedSub = engine.connectionClosedStream.listen((_) {
-        if (!mounted || _engine != engine) return;
-        _stopRealtime();
-      });
-    } catch (e) {
-      if (mounted) setState(() => _isActive = false);
-    }
+      if (!await _recorder.hasPermission()) return;
+      final Directory tempDir = await getTemporaryDirectory();
+      final String path =
+          '${tempDir.path}${Platform.pathSeparator}overlay_record_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: path);
+      if (mounted) setState(() => _holdRecordStartTime = DateTime.now());
+    } catch (_) {}
   }
 
-  void _scheduleDrain() {
-    _drainTimer?.cancel();
-    _drainTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted || _engine == null) {
-        _drainTimer?.cancel();
-        return;
-      }
-      if (_engine!.isDrainComplete) {
-        _drainTimer?.cancel();
-        _stopRealtime();
-      }
-    });
-  }
-
-  Future<void> _stopRealtime() async {
-    await _closedSub?.cancel();
-    _closedSub = null;
-    await _textSub?.cancel();
-    await _engine?.stop();
-    _engine = null;
-    _textSub = null;
-    if (mounted) setState(() => _isActive = false);
+  Future<void> _stopHoldAndTranscribe() async {
+    if (_holdRecordStartTime == null) return;
+    final DateTime startTime = _holdRecordStartTime!;
+    _holdRecordStartTime = null;
+    final String? path = await _recorder.stop();
+    if (mounted) setState(() {});
+    if (path == null) return;
+    final Duration duration = DateTime.now().difference(startTime);
+    if (duration < _holdRecordMinDuration) return;
+    try {
+      final effect = await loadEffectTranscribe();
+      await _engine.transcribe(path, effect: effect, useLlm: effect);
+    } catch (_) {}
+    try {
+      await File(path).delete();
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool isRecording = _holdRecordStartTime != null;
     return Material(
       color: Colors.transparent,
       elevation: 0,
       shadowColor: Colors.transparent,
       child: GestureDetector(
-        onLongPressStart: (_) => _startRealtime(),
-        onLongPressEnd: (_) => _scheduleDrain(),
+        onLongPressStart: (_) {
+          if (_holdRecordStartTime == null) _startHoldRecord();
+        },
+        onLongPressEnd: (_) => _stopHoldAndTranscribe(),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final size = constraints.biggest.shortestSide > 0
                 ? constraints.biggest.shortestSide
                 : 72.0;
             return Center(
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
                 width: size,
                 height: size,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
                   shape: BoxShape.circle,
+                  color: isRecording
+                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      : Theme.of(context).colorScheme.primaryContainer,
                 ),
                 child: Icon(
-                  _isActive ? Icons.stop : Icons.mic,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  isRecording ? Icons.stop : Icons.mic_none,
+                  color: isRecording
+                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      : Theme.of(context).colorScheme.onPrimaryContainer,
                   size: size * 0.5,
                 ),
               ),
