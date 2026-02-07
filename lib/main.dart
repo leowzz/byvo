@@ -74,6 +74,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   RealtimeStreamEngine? _realtimeStreamEngine;
   StreamSubscription<String>? _realtimeTextSub;
   StreamSubscription<void>? _realtimeClosedSub;
+  StreamSubscription<dynamic>? _overlayLogSub;
+  String? _overlayLogFilePath;
+  Timer? _overlayLogPollTimer;
 
   bool _showFloatingBall = false;
   bool _effectTranscribe = false;
@@ -90,10 +93,27 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _loadShowFloatingBall();
     _loadEffectTranscribe();
     _loadIdleTimeoutSec();
+    _overlayLogSub = FlutterOverlayWindow.overlayListener.listen((dynamic msg) {
+      DebugLog.instance.log(msg?.toString() ?? '');
+    });
+    _initOverlayLogPathAndPoll();
+  }
+
+  Future<void> _initOverlayLogPathAndPoll() async {
+    String? path = (await SharedPreferences.getInstance()).getString(kOverlayDebugLogPathKey);
+    if (path == null || path.isEmpty) {
+      final Directory d = await getTemporaryDirectory();
+      path = '${d.path}${Platform.pathSeparator}$kOverlayDebugLogFileName';
+      await (await SharedPreferences.getInstance()).setString(kOverlayDebugLogPathKey, path);
+    }
+    if (!mounted) return;
+    _overlayLogFilePath = path;
+    _overlayLogPollTimer = Timer.periodic(const Duration(milliseconds: 800), (_) => _pollOverlayLog());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _pollOverlayLog();
     if (state != AppLifecycleState.resumed || !_showFloatingBall || !Platform.isAndroid) return;
     Future<void>.microtask(() async {
       try {
@@ -147,8 +167,27 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     );
   }
 
+  void _pollOverlayLog() {
+    final path = _overlayLogFilePath;
+    if (path == null) return;
+    try {
+      final f = File(path);
+      if (!f.existsSync()) return;
+      final String content = f.readAsStringSync();
+      if (content.isEmpty) return;
+      f.writeAsStringSync('');
+      final lines = content.split('\n');
+      for (final line in lines) {
+        final s = line.trim();
+        if (s.isNotEmpty) DebugLog.instance.log(s);
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _overlayLogPollTimer?.cancel();
+    _overlayLogSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -821,31 +860,111 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   static const BackendTranscriptionEngine _engine = BackendTranscriptionEngine();
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
   DateTime? _holdRecordStartTime;
+  String? _overlayLogFilePath;
+  Future<void>? _overlayLogPathReady;
 
+  Future<void> _ensureOverlayLogPath() async {
+    if (_overlayLogFilePath != null) return;
+    _overlayLogPathReady ??= _loadOverlayLogPath();
+    await _overlayLogPathReady;
+  }
+
+  Future<void> _loadOverlayLogPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? path = prefs.getString(kOverlayDebugLogPathKey);
+    if (path == null || path.isEmpty) {
+      final Directory d = await getTemporaryDirectory();
+      path = '${d.path}${Platform.pathSeparator}$kOverlayDebugLogFileName';
+      await prefs.setString(kOverlayDebugLogPathKey, path);
+    }
+    if (mounted) _overlayLogFilePath = path;
+  }
+
+  void _log(String msg) {
+    if (!kDebugMode) return;
+    debugPrint(msg);
+    FlutterOverlayWindow.shareData(msg);
+    unawaited(_ensureOverlayLogPath().then((_) {
+      final path = _overlayLogFilePath;
+      if (path != null) {
+        try {
+          File(path).writeAsStringSync('$msg\n', mode: FileMode.append);
+        } catch (_) {}
+      }
+    }));
+  }
+
+  /// 长文分块发送；同时写文件供主应用轮询（先确保路径再写）。
+  void _logLong(String prefix, String text) {
+    if (!kDebugMode) return;
+    debugPrint('$prefix$text');
+    unawaited(_ensureOverlayLogPath().then((_) {
+      final path = _overlayLogFilePath;
+      if (path != null) {
+        try {
+          File(path).writeAsStringSync('$prefix$text\n', mode: FileMode.append);
+        } catch (_) {}
+      }
+    }));
+    const int chunkSize = 800;
+    if (text.length <= chunkSize) {
+      FlutterOverlayWindow.shareData('$prefix$text');
+      return;
+    }
+    FlutterOverlayWindow.shareData('$prefix(共${text.length}字)');
+    for (int i = 0; i < text.length; i += chunkSize) {
+      final String chunk = text.substring(i, (i + chunkSize).clamp(0, text.length));
+      FlutterOverlayWindow.shareData(chunk);
+    }
+  }
+
+  /// 悬浮球在独立引擎中运行，record 的 hasPermission() 在 overlay 上下文中常误报无权限（主应用已授权即可录）。
+  /// 直接尝试 start，失败再视为无权限。
   Future<void> _startHoldRecord() async {
     try {
-      if (!await _recorder.hasPermission()) return;
       final Directory tempDir = await getTemporaryDirectory();
       final String path =
           '${tempDir.path}${Platform.pathSeparator}overlay_record_${DateTime.now().millisecondsSinceEpoch}.wav';
       await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: path);
-      if (mounted) setState(() => _holdRecordStartTime = DateTime.now());
-    } catch (_) {}
+      if (mounted) {
+        setState(() => _holdRecordStartTime = DateTime.now());
+        _log('[悬浮球] 录制=开始');
+      }
+    } catch (e) {
+      final String msg = e.toString().toLowerCase();
+      if (msg.contains('permission') || msg.contains('权限')) {
+        _log('[悬浮球] 录制=无权限');
+      } else {
+        _log('[悬浮球] 录制=启动失败 $e');
+      }
+    }
   }
 
   Future<void> _stopHoldAndTranscribe() async {
     if (_holdRecordStartTime == null) return;
+    _log('[悬浮球] 长按=松手');
     final DateTime startTime = _holdRecordStartTime!;
     _holdRecordStartTime = null;
     final String? path = await _recorder.stop();
     if (mounted) setState(() {});
-    if (path == null) return;
+    if (path == null) {
+      _log('[悬浮球] 松手=无路径');
+      return;
+    }
     final Duration duration = DateTime.now().difference(startTime);
-    if (duration < _holdRecordMinDuration) return;
+    if (duration < _holdRecordMinDuration) {
+      _log('[悬浮球] 松手=太短 ${duration.inMilliseconds}ms');
+      return;
+    }
     try {
+      _log('[悬浮球] 转写=开始');
       final effect = await loadEffectTranscribe();
-      await _engine.transcribe(path, effect: effect, useLlm: effect);
-    } catch (_) {}
+      final result = await _engine.transcribe(path, effect: effect, useLlm: effect);
+      _log('[悬浮球] 转写=完成');
+      _logLong('[悬浮球] 转写结果: ', result.text);
+    } catch (e) {
+      _log('[悬浮球] 转写=失败 $e');
+    }
     try {
       await File(path).delete();
     } catch (_) {}
@@ -860,7 +979,10 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       shadowColor: Colors.transparent,
       child: GestureDetector(
         onLongPressStart: (_) {
-          if (_holdRecordStartTime == null) _startHoldRecord();
+          if (_holdRecordStartTime == null) {
+            _log('[悬浮球] 长按=按下');
+            _startHoldRecord();
+          }
         },
         onLongPressEnd: (_) => _stopHoldAndTranscribe(),
         child: LayoutBuilder(

@@ -62,6 +62,7 @@ async def transcribe(
         db.add(record)
         db.commit()
         db.refresh(record)
+        logger.debug(f"{record.id=} {record.text=}")
 
         return TranscribeResponse(
             id=record.id,

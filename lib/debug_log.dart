@@ -1,5 +1,11 @@
 import 'dart:async';
 
+/// 悬浮球写入的调试日志文件名（与主应用轮询读取共用）。
+const String kOverlayDebugLogFileName = 'byvo_overlay_debug.log';
+
+/// SharedPreferences 中保存的 overlay 日志文件完整路径 key，保证主应用与悬浮球读写同一文件。
+const String kOverlayDebugLogPathKey = 'byvo_overlay_debug_log_path';
+
 /// 全局调试日志，流式输出供 UI 展示。
 ///
 /// 仅在 debug 模式下使用；release 下可空实现。
