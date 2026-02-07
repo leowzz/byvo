@@ -46,13 +46,14 @@ class TranscribeStreamPipeline:
         audio_stream: AsyncIterator[bytes],
         *,
         effect: bool = False,
+        use_llm: bool = False,
         idle_timeout_sec: float = 5.0,
     ) -> None:
         self.ws = ws
         self.audio_stream = audio_stream
         self.effect = effect
         self.idle_timeout_sec = idle_timeout_sec
-        self.use_correction = settings.volcengine.ark_valid and effect
+        self.use_correction = settings.volcengine.ark_valid and use_llm
         self._loop = asyncio.get_running_loop()
 
         self.current_asr = ""
@@ -168,16 +169,19 @@ class TranscribeStreamPipeline:
 async def transcribe_stream(
     ws: WebSocket,
     effect: bool = Query(False, description="是否开启效果转写/去口语化"),
+    use_llm: bool = Query(False, description="是否启用 LLM 纠错，由后端配置决定"),
     idle_timeout_sec: int | None = Query(
         None, description="无新识别内容超过该秒数则关闭，不传则用服务端配置"
     ),
 ) -> None:
     """
     豆包流式转写。客户端发送 PCM（16k/16bit/mono），服务端返回
-    ``{"text": "当前全文", "is_final": false}``。Ark 配置有效且 effect 开启时做纠错。
+    ``{"text": "当前全文", "is_final": false}``。Ark 配置有效且 use_llm 为 true 时做纠错（use_llm 由后端配置决定）。
     """
     await ws.accept()
-    logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=}")
+    logger.info(
+        f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=} {use_llm=}"
+    )
 
     if idle_timeout_sec is not None:
         idle_timeout = float(
@@ -192,6 +196,7 @@ async def transcribe_stream(
             ws,
             _audio_stream_from_ws(ws),
             effect=effect,
+            use_llm=use_llm,
             idle_timeout_sec=idle_timeout,
         )
         await pipeline.run()

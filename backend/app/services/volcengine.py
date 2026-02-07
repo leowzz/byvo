@@ -132,16 +132,19 @@ async def transcribe_volcengine(
                 await asyncio.sleep(0.05)
 
         texts: list[str] = []
+
+        async def _receive_until_done() -> None:
+            async for msg in ws:
+                if not isinstance(msg, (bytes, bytearray)):
+                    continue
+                t, done = _parse_asr_message(bytes(msg))
+                if t:
+                    texts.append(t)
+                if done:
+                    return
+
         try:
-            async with asyncio.timeout(30):
-                async for msg in ws:
-                    if not isinstance(msg, (bytes, bytearray)):
-                        continue
-                    t, done = _parse_asr_message(bytes(msg))
-                    if t:
-                        texts.append(t)
-                    if done:
-                        break
+            await asyncio.wait_for(_receive_until_done(), timeout=30)
         except asyncio.TimeoutError:
             logger.warning("ASR receive timeout 30s")
 
