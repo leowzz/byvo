@@ -10,7 +10,7 @@ from app.config import settings
 from app.services import ark_correction, volcengine
 
 router = APIRouter()
-CORRECTION_WINDOW_SEC = 0.5
+CORRECTION_WINDOW_SEC = 1.8
 
 
 async def _audio_stream_from_ws(ws: WebSocket) -> AsyncIterator[bytes]:
