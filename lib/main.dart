@@ -270,21 +270,34 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
         return;
       }
       try {
-        // 主动弹出系统权限申请（显示在其他应用上层）
-        final granted = await FlutterOverlayWindow.requestPermission();
-        if (!mounted) return;
-        if (granted == true) {
+        // 先尝试直接显示悬浮窗；能显示则说明已有权限（避免 isPermissionGranted 从后台恢复后误报未授权）
+        try {
           await _doShowGlobalOverlay();
+          if (!mounted) return;
           setState(() => _showFloatingBall = true);
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool(_keyShowFloatingBall, true);
-        } else {
-          setState(() => _showFloatingBall = false);
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
-            );
+          return;
+        } on PlatformException catch (e) {
+          if (e.code != 'PERMISSION') rethrow;
+          // 无权限，弹出系统「显示在其他应用上层」设置页
+          final granted = await FlutterOverlayWindow.requestPermission();
+          if (!mounted) return;
+          if (granted == true) {
+            await _doShowGlobalOverlay();
+            if (!mounted) return;
+            setState(() => _showFloatingBall = true);
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool(_keyShowFloatingBall, true);
+          } else {
+            setState(() => _showFloatingBall = false);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
+              );
+            }
           }
+          return;
         }
       } on MissingPluginException {
         setState(() => _showFloatingBall = false);
