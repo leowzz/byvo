@@ -11,6 +11,10 @@ from app.services import ark_correction, volcengine
 
 router = APIRouter()
 CORRECTION_WINDOW_SEC = 1.8
+CHECK_INTERVAL_CAP_SEC = 5.0
+CORR_WAIT_TIMEOUT_SEC = 60.0
+IDLE_TIMEOUT_MIN = 1
+IDLE_TIMEOUT_MAX = 600
 
 
 async def _audio_stream_from_ws(ws: WebSocket) -> AsyncIterator[bytes]:
@@ -58,20 +62,22 @@ async def _run_stream_pipeline(
         finally:
             asr_done = True
 
+    async def send_chunk(text: str, snap: str) -> None:
+        """发送一段文本并更新 last_sent / last_speech_at。"""
+        nonlocal last_sent, last_speech_at
+        await _send_json(ws, {"text": text, "is_final": False})
+        last_sent = snap
+        last_speech_at = loop.time()
+
     async def correction_loop() -> None:
         nonlocal last_sent, stable_history, last_speech_at
         while True:
-            # 已标记需要断开时不再睡，尽快发完当前结果并退出
             if not idle_timeout_requested.is_set():
                 await asyncio.sleep(CORRECTION_WINDOW_SEC)
-            # 不在此处 break，确保有 pending 时先走完本轮回调并发送再在末尾 break
             snap = current_asr
-            if not snap:
-                if asr_done or idle_timeout_requested.is_set():
-                    break
-                continue
-            if snap == last_sent:
-                if asr_done or idle_timeout_requested.is_set():
+            done_or_closing = asr_done or idle_timeout_requested.is_set()
+            if not snap or snap == last_sent:
+                if done_or_closing:
                     break
                 continue
             try:
@@ -82,41 +88,31 @@ async def _run_stream_pipeline(
                         stable_history.append(text)
                 else:
                     text = snap
-                logger.info(f"[send] {text}")
-                await _send_json(ws, {"text": text, "is_final": False})
-                last_sent = snap
-                last_speech_at = loop.time()
+                await send_chunk(text, snap)
             except Exception as e:
                 logger.warning(f"correction error: {e=}")
-                logger.info(f"[send] {snap}")
-                await _send_json(ws, {"text": snap, "is_final": False})
-                last_sent = snap
-                last_speech_at = loop.time()
-            if idle_timeout_requested.is_set():
+                await send_chunk(snap, snap)
+            if idle_timeout_requested.is_set() or asr_done:
                 break
-            if asr_done:
-                break
-        logger.info(f"[send] {last_sent} :is_final")
         await _send_json(ws, {"text": last_sent or "", "is_final": True})
 
     async def idle_check_loop() -> None:
-        # 检查间隔不超过配置超时，否则 1s 超时要等下一轮（5s）才触发
-        check_interval = min(5.0, idle_timeout_sec)
-        corr_wait_timeout = 10.0
+        check_interval = min(CHECK_INTERVAL_CAP_SEC, idle_timeout_sec)
         while True:
             await asyncio.sleep(check_interval)
             if loop.time() - last_asr_update_at >= idle_timeout_sec:
                 logger.debug(f"transcribe ws idle timeout (no speech) after {idle_timeout_sec}s")
                 idle_timeout_requested.set()
                 try:
-                    await asyncio.wait_for(asyncio.shield(corr_task), timeout=corr_wait_timeout)
+                    await asyncio.wait_for(
+                        asyncio.shield(corr_task), timeout=CORR_WAIT_TIMEOUT_SEC
+                    )
                 except asyncio.TimeoutError:
                     corr_task.cancel()
                     try:
                         await corr_task
                     except asyncio.CancelledError:
                         pass
-                logger.info("[send] closed: idle_timeout")
                 await _send_json(ws, {"closed": True, "reason": "idle_timeout"})
                 asr_task.cancel()
                 return
@@ -127,17 +123,9 @@ async def _run_stream_pipeline(
     try:
         await asyncio.gather(asr_task, corr_task, idle_task)
     except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
-        asr_task.cancel()
-        corr_task.cancel()
-        idle_task.cancel()
-        try:
-            await asyncio.gather(asr_task, corr_task, idle_task)
-        except (asyncio.CancelledError, Exception):
-            pass
-
-
-IDLE_TIMEOUT_MIN = 1
-IDLE_TIMEOUT_MAX = 600
+        for t in (asr_task, corr_task, idle_task):
+            t.cancel()
+        await asyncio.gather(asr_task, corr_task, idle_task, return_exceptions=True)
 
 
 @router.websocket("/transcribe/stream")
@@ -167,7 +155,6 @@ async def transcribe_stream(
         logger.debug(f"stream ws closed: {e=}")
     except Exception as e:
         logger.warning(f"stream error: {e=}")
-        logger.info("[send] closed: error")
         await _send_json(ws, {"text": "", "is_final": True, "error": str(e)})
     finally:
         try:
