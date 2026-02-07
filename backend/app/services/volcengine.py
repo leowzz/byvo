@@ -62,8 +62,12 @@ def _read_wav_to_16k_mono(path: str | Path) -> tuple[bytes, int]:
     return pcm.tobytes(), sr
 
 
-async def transcribe_volcengine(audio_path: str | Path) -> TranscribeResult:
-    """调用豆包 API 转写音频；豆包仅返回 text，其余为 None。"""
+async def transcribe_volcengine(
+    audio_path: str | Path,
+    *,
+    effect: bool = False,
+) -> TranscribeResult:
+    """调用豆包 API 转写音频；豆包仅返回 text，其余为 None。effect 为 True 时开启语义顺滑（去口语化）。"""
     volc = settings.volcengine
     if not volc.valid:
         raise ValueError("豆包 API 未配置，请设置 config/config.yaml 或环境变量 VOLCENGINE__APP_KEY 等")
@@ -96,6 +100,7 @@ async def transcribe_volcengine(audio_path: str | Path) -> TranscribeResult:
                 "model_name": "bigmodel",
                 "enable_itn": True,
                 "enable_punc": True,
+                "enable_ddc": effect,
             },
         }
         json_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -131,11 +136,14 @@ async def transcribe_volcengine(audio_path: str | Path) -> TranscribeResult:
 
 async def transcribe_volcengine_stream(
     audio_stream: AsyncIterator[bytes],
+    *,
+    effect: bool = False,
 ) -> AsyncIterator[str]:
     """
     流式转写：接收 PCM 流，边收边发豆包，yield 增量识别结果。
 
     :param audio_stream: PCM 16k/16bit/mono bytes 的异步迭代器
+    :param effect: 是否开启语义顺滑（去口语化）
     :yield: 增量识别文本
     """
     volc = settings.volcengine
@@ -169,6 +177,7 @@ async def transcribe_volcengine_stream(
                 "model_name": "bigmodel",
                 "enable_itn": True,
                 "enable_punc": True,
+                "enable_ddc": effect,
             },
         }
         json_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")

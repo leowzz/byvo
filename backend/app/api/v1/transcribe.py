@@ -4,7 +4,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ router = APIRouter()
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
     audio: UploadFile = File(...),
+    effect: bool = Query(False, description="是否开启效果转写/去口语化（语义顺滑）"),
     db: Session = Depends(get_db),
 ) -> TranscribeResponse:
     """上传 WAV 音频，豆包转写，结果持久化后返回。"""
@@ -39,7 +40,7 @@ async def transcribe(
     try:
         loop = asyncio.get_running_loop()
         start = loop.time()
-        result = await volcengine.transcribe_volcengine(tmp_path)
+        result = await volcengine.transcribe_volcengine(tmp_path, effect=effect)
         elapsed = loop.time() - start
         logger.info(f"volcengine {elapsed=:.2f}s {len(result.text)=}")
 

@@ -22,9 +22,12 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
   Future<TranscriptionResult> transcribe(
     String audioPath, {
     String? modelSource,
+    bool effect = false,
   }) async {
     final baseUrl = await loadBackendUrl();
-    final uri = Uri.parse('$baseUrl/api/v1/transcribe');
+    final uri = Uri.parse('$baseUrl/api/v1/transcribe').replace(
+      queryParameters: <String, String>{'effect': effect ? 'true' : 'false'},
+    );
     final file = File(audioPath);
     if (!await file.exists()) {
       throw StateError('音频文件不存在: $audioPath');

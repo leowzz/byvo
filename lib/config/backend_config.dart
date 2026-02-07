@@ -17,6 +17,20 @@ Future<void> saveBackendUrl(String url) async {
   await prefs.setString(_keyBackendUrl, url);
 }
 
+const String _keyEffectTranscribe = 'effect_transcribe';
+
+/// 是否开启效果转写（去口语化/语义顺滑）。
+Future<bool> loadEffectTranscribe() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool(_keyEffectTranscribe) ?? false;
+}
+
+/// 保存效果转写开关。
+Future<void> saveEffectTranscribe(bool value) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool(_keyEffectTranscribe, value);
+}
+
 /// 将 HTTP(S) base URL 转为 WebSocket URL。
 String backendUrlToWebSocket(String baseUrl) {
   if (baseUrl.startsWith('https://')) {

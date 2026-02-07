@@ -37,12 +37,16 @@ class RealtimeStreamEngine {
   }
 
   /// 开始流式转写，连接后端 WS 并开始录音。
-  Future<void> start() async {
+  ///
+  /// [effect] 是否开启效果转写（去口语化/语义顺滑）。
+  Future<void> start({bool effect = false}) async {
     if (_recorder != null) return;
 
     final baseUrl = await loadBackendUrl();
     final wsUrl = backendUrlToWebSocket(baseUrl);
-    final uri = Uri.parse('$wsUrl/api/v1/transcribe/stream');
+    final uri = Uri.parse('$wsUrl/api/v1/transcribe/stream').replace(
+      queryParameters: <String, String>{'effect': effect ? 'true' : 'false'},
+    );
 
     _recorder = AudioRecorder();
     _stopping = false;

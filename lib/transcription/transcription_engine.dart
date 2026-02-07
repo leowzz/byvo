@@ -14,8 +14,10 @@ abstract class TranscriptionEngine {
   /// 对 [audioPath] 进行转写。
   ///
   /// [modelSource] 为模型来源：本地时为模型目录路径；远程 API 时可为 null 或由实现忽略。
+  /// [effect] 是否开启效果转写（去口语化/语义顺滑），仅后端豆包等支持时有效。
   Future<TranscriptionResult> transcribe(
     String audioPath, {
     String? modelSource,
+    bool effect = false,
   });
 }

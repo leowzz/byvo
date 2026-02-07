@@ -41,6 +41,7 @@ class VolcengineEngine implements TranscriptionEngine {
   Future<TranscriptionResult> transcribe(
     String audioPath, {
     String? modelSource,
+    bool effect = false,
   }) async {
     final VolcengineCredentials cred = await loadVolcengineCredentials();
     if (!cred.isValid) {
@@ -53,7 +54,7 @@ class VolcengineEngine implements TranscriptionEngine {
     final IOWebSocketChannel channel = _connectWithHeaders(cred);
     try {
       await channel.ready;
-      await _sendFullClientRequest(channel);
+      await _sendFullClientRequest(channel, effect: effect);
       await _sendAudioChunks(channel, pcm.bytes);
       final String text = await _receiveFinalResult(channel);
       return TranscriptionResult(text: text);
@@ -85,7 +86,10 @@ class VolcengineEngine implements TranscriptionEngine {
     buf[offset + 3] = size & 0xff;
   }
 
-  Future<void> _sendFullClientRequest(IOWebSocketChannel channel) async {
+  Future<void> _sendFullClientRequest(
+    IOWebSocketChannel channel, {
+    bool effect = false,
+  }) async {
     final Map<String, dynamic> body = {
       'audio': {
         'format': 'pcm',
@@ -98,6 +102,7 @@ class VolcengineEngine implements TranscriptionEngine {
         'model_name': 'bigmodel',
         'enable_itn': true,
         'enable_punc': true,
+        'enable_ddc': effect,
       },
     };
     final Uint8List jsonBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));

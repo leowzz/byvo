@@ -71,11 +71,18 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   StreamSubscription<String>? _realtimeTextSub;
 
   bool _showFloatingBall = false;
+  bool _effectTranscribe = false;
 
   @override
   void initState() {
     super.initState();
     _loadShowFloatingBall();
+    _loadEffectTranscribe();
+  }
+
+  Future<void> _loadEffectTranscribe() async {
+    final value = await loadEffectTranscribe();
+    if (mounted) setState(() => _effectTranscribe = value);
   }
 
   Future<void> _loadShowFloatingBall() async {
@@ -177,7 +184,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
       _result = null;
     });
     try {
-      final TranscriptionResult result = await _engine.transcribe(_audioPath!);
+      final TranscriptionResult result = await _engine.transcribe(
+        _audioPath!,
+        effect: _effectTranscribe,
+      );
       _safeSetState(() {
         _isTranscribing = false;
         _result = result;
@@ -205,7 +215,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     final engine = RealtimeStreamEngine();
     _realtimeStreamEngine = engine;
     try {
-      await engine.start();
+      await engine.start(effect: _effectTranscribe);
       if (!mounted || !_isRealtimeTranscribing) return;
       _safeSetState(() => _isRecording = true);
       _realtimeTextSub = engine.textStream.listen((String text) {
@@ -331,6 +341,20 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
                     Switch(
                       value: _showFloatingBall,
                       onChanged: (bool v) => _onFloatingBallSwitchChanged(context, v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('效果转写（去口语化）', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Switch(
+                      value: _effectTranscribe,
+                      onChanged: (bool v) async {
+                        setState(() => _effectTranscribe = v);
+                        await saveEffectTranscribe(v);
+                      },
                     ),
                   ],
                 ),
@@ -610,10 +634,11 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   Future<void> _startRealtime() async {
     if (!await _recorder.hasPermission()) return;
     setState(() => _isActive = true);
+    final effect = await loadEffectTranscribe();
     final engine = RealtimeStreamEngine();
     _engine = engine;
     try {
-      await engine.start();
+      await engine.start(effect: effect);
       if (!mounted || !_isActive) return;
       _textSub = engine.textStream.listen((_) {});
     } catch (e) {

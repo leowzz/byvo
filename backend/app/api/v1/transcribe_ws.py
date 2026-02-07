@@ -36,6 +36,8 @@ async def _safe_send_json(ws: WebSocket, payload: dict) -> None:
 async def _run_asr_and_correction(
     ws: WebSocket,
     audio_stream: AsyncIterator[bytes],
+    *,
+    effect: bool = False,
 ) -> None:
     """
     ASR 流 + 500ms 窗口纠错：仅当 Ark 配置有效时启用纠错，否则只下发 ASR 全文。
@@ -48,12 +50,15 @@ async def _run_asr_and_correction(
     async def consume_asr() -> None:
         nonlocal current_asr, asr_done
         try:
-            async for full_text in volcengine.transcribe_volcengine_stream(audio_stream):
+            async for full_text in volcengine.transcribe_volcengine_stream(
+                audio_stream, effect=effect
+            ):
                 current_asr = full_text
         finally:
             asr_done = True
 
-    use_correction = settings.volcengine.ark_valid
+    # 仅当用户开启「效果转写」且 Ark 已配置时，才走纠错大模型路径
+    use_correction = settings.volcengine.ark_valid and effect
 
     async def correction_loop() -> None:
         nonlocal last_sent, stable_history
@@ -101,7 +106,10 @@ async def _run_asr_and_correction(
 
 
 @router.websocket("/transcribe/stream")
-async def transcribe_stream(ws: WebSocket) -> None:
+async def transcribe_stream(
+    ws: WebSocket,
+    effect: bool = Query(False, description="是否开启效果转写/去口语化"),
+) -> None:
     """
     豆包流式转写。客户端发送二进制 PCM（16k/16bit/mono），服务端返回
     ``{ "text": "当前全文（ASR 或纠错后）", "is_final": false }``。
@@ -109,13 +117,15 @@ async def transcribe_stream(ws: WebSocket) -> None:
     """
     await ws.accept()
     audio_stream = _audio_stream_from_ws(ws)
-    logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=}")
+    logger.info(f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=}")
 
     try:
         if settings.volcengine.ark_valid:
-            await _run_asr_and_correction(ws, audio_stream)
+            await _run_asr_and_correction(ws, audio_stream, effect=effect)
         else:
-            async for full_text in volcengine.transcribe_volcengine_stream(audio_stream):
+            async for full_text in volcengine.transcribe_volcengine_stream(
+                audio_stream, effect=effect
+            ):
                 await _safe_send_json(ws, {"text": full_text, "is_final": False})
             await _safe_send_json(ws, {"text": "", "is_final": True})
     except (WebSocketDisconnect, RuntimeError) as e:
