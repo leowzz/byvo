@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 创建 Release、上传附件
 
     steps:
       - name: Checkout
@@ -57,6 +59,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: "byvo-${{ github.ref_name }}.apk"
-          generate_release_notes: true
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
