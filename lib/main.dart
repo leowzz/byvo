@@ -16,6 +16,8 @@ import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_result.dart';
 
 const String _keyShowFloatingBall = 'show_floating_ball';
+const String _keyOverlayLastX = 'overlay_last_x';
+const String _keyOverlayLastY = 'overlay_last_y';
 
 void main() {
   if (kDebugMode) {
@@ -112,7 +114,15 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
+  /// 若有上次保存的位置则用 startPosition 恢复，否则按 alignment 放到默认位置。
   Future<void> _doShowGlobalOverlay() async {
+    OverlayPosition? startPosition;
+    final prefs = await SharedPreferences.getInstance();
+    final x = prefs.getDouble(_keyOverlayLastX);
+    final y = prefs.getDouble(_keyOverlayLastY);
+    if (x != null && y != null) {
+      startPosition = OverlayPosition(x, y);
+    }
     await FlutterOverlayWindow.showOverlay(
       height: 180,
       width: 180,
@@ -120,6 +130,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       enableDrag: true,
       overlayTitle: 'byvo',
       overlayContent: '长按转写',
+      startPosition: startPosition,
     );
   }
 
@@ -329,6 +340,13 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
       return;
     }
+    // 关闭前保存当前位置，下次打开时恢复
+    try {
+      final pos = await FlutterOverlayWindow.getOverlayPosition();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_keyOverlayLastX, pos.x);
+      await prefs.setDouble(_keyOverlayLastY, pos.y);
+    } catch (_) {}
     // 先更新 UI 和偏好，再关闭 overlay，保证开关一定能关上（即使 overlay 已消失或 closeOverlay 异常）
     setState(() => _showFloatingBall = false);
     final prefs = await SharedPreferences.getInstance();
@@ -699,6 +717,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
+      elevation: 0,
+      shadowColor: Colors.transparent,
       child: GestureDetector(
         onLongPressStart: (_) => _startRealtime(),
         onLongPressEnd: (_) => _scheduleDrain(),
@@ -714,13 +734,6 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
                 ),
                 child: Icon(
                   _isActive ? Icons.stop : Icons.mic,
