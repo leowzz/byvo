@@ -56,7 +56,8 @@ class TranscriptionMvpPage extends StatefulWidget {
   State<TranscriptionMvpPage> createState() => _TranscriptionMvpPageState();
 }
 
-class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
+class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
+    with WidgetsBindingObserver {
   static const BackendTranscriptionEngine _engine = BackendTranscriptionEngine();
 
   String? _audioPath;
@@ -76,8 +77,21 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadShowFloatingBall();
     _loadEffectTranscribe();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_showFloatingBall || !Platform.isAndroid) return;
+    Future<void>.microtask(() async {
+      try {
+        if (!mounted) return;
+        if (await FlutterOverlayWindow.isActive()) return;
+        await _doShowGlobalOverlay();
+      } catch (_) {}
+    });
   }
 
   Future<void> _loadEffectTranscribe() async {
@@ -92,18 +106,16 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
     setState(() => _showFloatingBall = show);
     if (show && Platform.isAndroid) {
       try {
-        if (await FlutterOverlayWindow.isPermissionGranted()) {
-          await _doShowGlobalOverlay();
-        }
+        if (!await FlutterOverlayWindow.isActive()) await _doShowGlobalOverlay();
       } catch (_) {}
     }
   }
 
-  /// 仅全局悬浮窗（Android）。
+  /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
   Future<void> _doShowGlobalOverlay() async {
     await FlutterOverlayWindow.showOverlay(
-      height: 56,
-      width: 56,
+      height: 180,
+      width: 180,
       alignment: OverlayAlignment.centerRight,
       enableDrag: true,
       overlayTitle: 'byvo',
@@ -113,6 +125,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -316,12 +329,13 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage> {
       }
       return;
     }
-    try {
-      await FlutterOverlayWindow.closeOverlay();
-    } catch (_) {}
+    // 先更新 UI 和偏好，再关闭 overlay，保证开关一定能关上（即使 overlay 已消失或 closeOverlay 异常）
     setState(() => _showFloatingBall = false);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyShowFloatingBall, false);
+    try {
+      await FlutterOverlayWindow.closeOverlay();
+    } catch (_) {}
   }
 
   @override
@@ -688,25 +702,34 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       child: GestureDetector(
         onLongPressStart: (_) => _startRealtime(),
         onLongPressEnd: (_) => _scheduleDrain(),
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 6,
-                offset: const Offset(0, 2),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final size = constraints.biggest.shortestSide > 0
+                ? constraints.biggest.shortestSide
+                : 72.0;
+            return Center(
+              child: Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  _isActive ? Icons.stop : Icons.mic,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  size: size * 0.5,
+                ),
               ),
-            ],
-          ),
-          child: Icon(
-            _isActive ? Icons.stop : Icons.mic,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
-            size: 28,
-          ),
+            );
+          },
         ),
       ),
     );
