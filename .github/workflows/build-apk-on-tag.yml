@@ -8,7 +8,7 @@ name: Build APK on Tag
 on:
   push:
     tags:
-      - 'V*'
+      - '[Vv]*'
 
 jobs:
   build:
