@@ -48,3 +48,15 @@ jobs:
         with:
           name: byvo-apk-${{ github.ref_name }}
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Prepare release asset
+        run: cp build/app/outputs/flutter-apk/app-release.apk "byvo-${{ github.ref_name }}.apk"
+
+      - name: Create Release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: "byvo-${{ github.ref_name }}.apk"
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
