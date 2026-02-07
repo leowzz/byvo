@@ -383,121 +383,125 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         title: Text('byvo · ${_engine.displayName}'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            Container(
+              height: kToolbarHeight + MediaQuery.of(context).padding.top,
+              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 8, 16, 8),
+              decoration: BoxDecoration(color: Theme.of(context).colorScheme.inversePrimary.withOpacity(0.3)),
+              alignment: Alignment.centerLeft,
+              child: const Text('设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              title: const Text('悬浮球'),
+              trailing: Switch(
+                value: _showFloatingBall,
+                onChanged: (bool v) => _onFloatingBallSwitchChanged(context, v),
+              ),
+            ),
+            ListTile(
+              title: const Text('LLM处理'),
+              trailing: Switch(
+                value: _effectTranscribe,
+                onChanged: (bool v) async {
+                  setState(() => _effectTranscribe = v);
+                  await saveEffectTranscribe(v);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
       body: Column(
         children: [
-          // 上部约 70%：主内容
           Expanded(
             flex: 7,
             child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => _openBackendSettings(context),
-                  icon: const Icon(Icons.settings),
-                  label: const Text('后端地址配置'),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('悬浮球', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Switch(
-                      value: _showFloatingBall,
-                      onChanged: (bool v) => _onFloatingBallSwitchChanged(context, v),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('效果转写（去口语化）', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Switch(
-                      value: _effectTranscribe,
-                      onChanged: (bool v) async {
-                        setState(() => _effectTranscribe = v);
-                        await saveEffectTranscribe(v);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(
-                  _audioPath != null
-                      ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
-                      : '录制后点击转写',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: _isTranscribing || _isRealtimeTranscribing
-                          ? null
-                          : _isRecording
-                              ? () => _stopRecording(context)
-                              : _startRecording,
-                      icon: Icon(_isRealtimeTranscribing ? Icons.mic : (_isRecording ? Icons.stop : Icons.mic)),
-                      label: Text(_isRealtimeTranscribing ? '录制' : (_isRecording ? '停止录制' : '录制')),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _isRealtimeTranscribing
-                          ? _stopRealtimeTranscribe
-                          : (_isTranscribing || _isRecording ? null : () => _startRealtimeTranscribe(context)),
-                      icon: _isRealtimeTranscribing ? const Icon(Icons.stop_circle) : const Icon(Icons.record_voice_over),
-                      label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: (_isTranscribing || _isRealtimeTranscribing || !canTranscribe) ? null : () => _transcribe(context),
-                  icon: _isTranscribing
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.transcribe),
-                  label: Text(_isTranscribing ? '转写中…' : '转写'),
-                ),
-                if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
-                  const SizedBox(height: 24),
-                  const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
-                  if (_realtimeConnectionClosed) ...[
-                    if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
-                    Text('已关闭', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline)),
-                  ],
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ],
-                if (_result != null) ...[
-                  const SizedBox(height: 24),
-                  const Text('转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  SelectableText(_result!.text),
-                  if (_result!.emotion != null || _result!.event != null) ...[
-                    const SizedBox(height: 12),
-                    const Text('情感 / 环境', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  if (_result!.lang != null) ...[
-                    const SizedBox(height: 4),
-                    Text('语种: ${_result!.lang}', style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ],
-              ],
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => _openBackendSettings(context),
+                        icon: const Icon(Icons.settings),
+                        label: const Text('后端地址配置'),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(
+                        _audioPath != null
+                            ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
+                            : '录制后点击转写',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: _isTranscribing || _isRealtimeTranscribing
+                                ? null
+                                : _isRecording
+                                    ? () => _stopRecording(context)
+                                    : _startRecording,
+                            icon: Icon(_isRealtimeTranscribing ? Icons.mic : (_isRecording ? Icons.stop : Icons.mic)),
+                            label: Text(_isRealtimeTranscribing ? '录制' : (_isRecording ? '停止录制' : '录制')),
+                          ),
+                          FilledButton.icon(
+                            onPressed: _isRealtimeTranscribing
+                                ? _stopRealtimeTranscribe
+                                : (_isTranscribing || _isRecording ? null : () => _startRealtimeTranscribe(context)),
+                            icon: _isRealtimeTranscribing ? const Icon(Icons.stop_circle) : const Icon(Icons.record_voice_over),
+                            label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        onPressed: (_isTranscribing || _isRealtimeTranscribing || !canTranscribe) ? null : () => _transcribe(context),
+                        icon: _isTranscribing
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.transcribe),
+                        label: Text(_isTranscribing ? '转写中…' : '转写'),
+                      ),
+                      if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
+                        const SizedBox(height: 24),
+                        const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
+                        if (_realtimeConnectionClosed) ...[
+                          if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
+                          Text('已关闭', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline)),
+                        ],
+                      ],
+                      if (_error != null) ...[
+                        const SizedBox(height: 16),
+                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ],
+                      if (_result != null) ...[
+                        const SizedBox(height: 24),
+                        const Text('转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        SelectableText(_result!.text),
+                        if (_result!.emotion != null || _result!.event != null) ...[
+                          const SizedBox(height: 12),
+                          const Text('情感 / 环境', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(
+                            '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                        if (_result!.lang != null) ...[
+                          const SizedBox(height: 4),
+                          Text('语种: ${_result!.lang}', style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ],
+                    ],
             ),
           ),
-          // 底部约 30%：调试日志小窗
           Expanded(
             flex: 3,
             child: _DebugLogPanel(),
