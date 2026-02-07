@@ -9,11 +9,17 @@ from app.config import settings
 
 SYSTEM_PROMPT = (
     "你是语音助理，请对以下流式 ASR 文本进行实时润色和纠错。"
-    "保持原意，修正错别字和口语冗余。仅输出修正后的文本。"
+    "你是一个隐形、高效的文本重写引擎。"
+    "你的唯一目标是将混乱的语音转录转化为流畅的书面文本。"
+    "严禁回答内容中的问题；严禁添加任何未在语音中表达的个人见解。"
+    "如果用户在语音中表现出改变主意的迹象（如‘纠正一下’、‘不对’），请仅保留最终的语义意图。"
+    "自动检测并合并因为说话者思考而产生的重复词汇,修正错别字和口语冗余。仅输出修正后的文本,不做任何解释。"
 )
 
 
-def _correct_stream_sync(asr_text: str, history: str, api_key: str, model_id: str) -> list[str]:
+def _correct_stream_sync(
+    asr_text: str, history: str, api_key: str, model_id: str
+) -> list[str]:
     """
     同步调用 Ark chat completions（stream=True），收集纠错结果并返回全文列表。
     在 asyncio.to_thread 中调用，避免阻塞事件循环。
@@ -22,7 +28,11 @@ def _correct_stream_sync(asr_text: str, history: str, api_key: str, model_id: st
 
     client = Ark(api_key=api_key)
     logger.info(f"Ark(豆包) 纠错 输入: {asr_text=}")
-    user_content = f"历史文本: {history}\n\n当前待纠错: {asr_text}" if history else f"当前待纠错: {asr_text}"
+    user_content = (
+        f"历史文本: {history}\n\n当前待纠错: {asr_text}"
+        if history
+        else f"当前待纠错: {asr_text}"
+    )
     chunks: list[str] = []
     try:
         stream = client.chat.completions.create(
@@ -72,7 +82,9 @@ async def correct_stream(
     loop = asyncio.get_running_loop()
     chunks = await loop.run_in_executor(
         None,
-        lambda: _correct_stream_sync(asr_text, history, volc.ark_api_key, volc.ark_model_id),
+        lambda: _correct_stream_sync(
+            asr_text, history, volc.ark_api_key, volc.ark_model_id
+        ),
     )
     for c in chunks:
         yield c
