@@ -17,6 +17,13 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "2.1.1"
+  byvo_insert_text:
+    dependency: "direct main"
+    description:
+      path: "packages/byvo_insert_text"
+      relative: true
+    source: path
+    version: "0.0.1"
   characters:
     dependency: transitive
     description:

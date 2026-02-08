@@ -19,6 +19,10 @@ const String _keyShowFloatingBall = 'show_floating_ball';
 const String _keyOverlayLastX = 'overlay_last_x';
 const String _keyOverlayLastY = 'overlay_last_y';
 
+/// 悬浮窗通过 shareData 发送此前缀 + 正文，主应用解析后调用平台填入当前输入框。
+const String _insertTextPrefix = 'INSERT_TEXT:\n';
+final MethodChannel _insertTextChannel = MethodChannel('byvo/insert_text');
+
 void main() {
   if (kDebugMode) {
     // 将 debugPrint 同时输出到调试小窗
@@ -82,6 +86,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   bool _effectTranscribe = false;
   int _idleTimeoutSec = 30;
 
+  /// 主页面测试输入框，用于测悬浮球转写填入。
+  final TextEditingController _testInputController = TextEditingController();
+
   /// 长按录音按钮按下时间，用于松手后判断是否达到最短时长再转写。
   DateTime? _holdRecordStartTime;
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
@@ -94,7 +101,14 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _loadEffectTranscribe();
     _loadIdleTimeoutSec();
     _overlayLogSub = FlutterOverlayWindow.overlayListener.listen((dynamic msg) {
-      DebugLog.instance.log(msg?.toString() ?? '');
+      final s = msg?.toString() ?? '';
+      if (s.startsWith(_insertTextPrefix)) {
+        final text = s.substring(_insertTextPrefix.length);
+        _requestInsertTextToFocusedField(text);
+        if (kDebugMode) DebugLog.instance.log('已请求填入当前输入框');
+        return;
+      }
+      DebugLog.instance.log(s);
     });
     _initOverlayLogPathAndPoll();
   }
@@ -184,10 +198,24 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     } catch (_) {}
   }
 
+  /// 请求将文本填入当前聚焦的输入框（需已开启 byvo 辅助功能）。
+  void _requestInsertTextToFocusedField(String text) {
+    if (!Platform.isAndroid) return;
+    unawaited(
+      _insertTextChannel
+          .invokeMethod<bool>('insertTextToFocusedField', {'text': text})
+          .catchError((Object e, StackTrace st) {
+        if (kDebugMode) DebugLog.instance.log('填入输入框失败: $e');
+        return null;
+      }),
+    );
+  }
+
   @override
   void dispose() {
     _overlayLogPollTimer?.cancel();
     _overlayLogSub?.cancel();
+    _testInputController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -544,6 +572,19 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                         onPressed: () => _openBackendSettings(context),
                         icon: const Icon(Icons.settings),
                         label: const Text('后端地址配置'),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('测试填入（悬浮球转写会填入此处）', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: _testInputController,
+                        decoration: const InputDecoration(
+                          hintText: '点一下获得焦点，再用悬浮球长按录音转写',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        maxLines: 3,
+                        minLines: 1,
                       ),
                       const SizedBox(height: 24),
                       const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -962,6 +1003,19 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       final result = await _engine.transcribe(path, effect: effect, useLlm: effect);
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
+      FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');
+      if (Platform.isAndroid && result.text.isNotEmpty) {
+        _log('[悬浮球] 请求填入当前输入框');
+        try {
+          final ok = await _insertTextChannel.invokeMethod<bool>(
+            'insertTextToFocusedField',
+            <String, dynamic>{'text': result.text},
+          );
+          _log('[悬浮球] 填入输入框=${ok == true ? "已请求" : "未成功"}');
+        } catch (e) {
+          _log('[悬浮球] 填入输入框失败: $e');
+        }
+      }
     } catch (e) {
       _log('[悬浮球] 转写=失败 $e');
     }
