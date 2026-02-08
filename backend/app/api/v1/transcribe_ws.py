@@ -94,6 +94,21 @@ class TranscribeStreamPipeline:
             done_or_closing = self.asr_done or self.idle_timeout_requested.is_set()
             if not snap or snap == self.last_sent:
                 if done_or_closing:
+                    # 断开前若开启 LLM 且当前有 ASR 内容，做最后一次 LLM 处理
+                    if self.use_correction and snap:
+                        try:
+                            history = (
+                                "\n".join(self.stable_history[-3:])
+                                if self.stable_history
+                                else ""
+                            )
+                            text = await ark_correction.correct_full(
+                                snap, history=history
+                            )
+                            await self._send_chunk(text, snap)
+                        except Exception as e:
+                            logger.warning(f"final correction error: {e=}")
+                            await self._send_chunk(snap, snap)
                     break
                 continue
             try:
@@ -121,7 +136,7 @@ class TranscribeStreamPipeline:
         while True:
             await asyncio.sleep(check_interval)
             if self._loop.time() - self.last_asr_update_at >= self.idle_timeout_sec:
-                logger.debug(
+                logger.info(
                     f"transcribe ws idle timeout (no speech) after {self.idle_timeout_sec}s"
                 )
                 self.idle_timeout_requested.set()
