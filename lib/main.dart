@@ -147,7 +147,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
-  /// enableDrag: false 时触摸才能传到 Flutter，长按录音才可用；球不能拖动，需在应用内关掉再开可重定位。
+  /// enableDrag: true 时由原生处理拖动；长按录音依赖 Flutter 收到触摸，若被原生占用则仅在未拖动时生效。
   Future<void> _doShowGlobalOverlay() async {
     OverlayPosition? startPosition;
     final prefs = await SharedPreferences.getInstance();
@@ -160,7 +160,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       height: 180,
       width: 180,
       alignment: OverlayAlignment.centerRight,
-      enableDrag: false,
+      enableDrag: true,
       overlayTitle: 'byvo',
       overlayContent: '长按约 0.5 秒录音',
       startPosition: startPosition,
@@ -847,7 +847,7 @@ void overlayMain() {
 }
 
 /// 全局悬浮窗内的球：与主页面「长按录音转写」一致，长按录音、松手停止并调用 POST 转写接口。
-/// 不调用 resizeOverlay（插件会把 180 当 dp 转成像素，球会突然变大）。拖拽仍由原生 enableDrag 处理。
+/// 不调用 resizeOverlay（插件会把 180 当 dp 转成像素，球会突然变大）。拖动由原生 enableDrag 处理。
 class OverlayBallPage extends StatefulWidget {
   const OverlayBallPage({super.key});
 
