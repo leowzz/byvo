@@ -36,6 +36,15 @@ class RealtimeStreamEngine {
   /// 连接已关闭（服务端空闲超时或断开等），仅触发一次。
   Stream<void> get connectionClosedStream => _connectionClosedController.stream;
 
+  static String? closeErrorMessageForCode(int? closeCode, String? closeReason) {
+    if (closeCode != 1008) return null;
+    final reason = (closeReason ?? '').trim();
+    if (reason.isEmpty) {
+      return '实时转写认证失败：请检查 API Key';
+    }
+    return '实时转写认证失败：请检查 API Key（$reason）';
+  }
+
   /// 是否已发送完毕：已连接且连续 1 秒无音频发送且 1 秒无服务端返回。
   bool get isDrainComplete {
     if (_lastAudioSentAt == null || _lastResponseAt == null) return false;
@@ -151,6 +160,13 @@ class RealtimeStreamEngine {
         }
       },
       onDone: () {
+        final closeCode = _channel?.closeCode;
+        final closeReason = _channel?.closeReason;
+        final closeErrorMessage =
+            closeErrorMessageForCode(closeCode, closeReason);
+        if (closeErrorMessage != null && !_textController.isClosed) {
+          _textController.addError(StateError(closeErrorMessage));
+        }
         DebugLog.instance.logApi('实时', 'WS closed');
         _emitConnectionClosed();
       },
