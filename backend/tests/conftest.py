@@ -5,6 +5,9 @@ import types
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 if "soundfile" not in sys.modules:
@@ -17,6 +20,7 @@ if "soundfile" not in sys.modules:
     sys.modules["soundfile"] = soundfile_stub
 
 from app.config import settings
+from app.database import Base, get_db
 from app.main import app
 
 
@@ -53,6 +57,32 @@ def reset_api_keys() -> Iterator[None]:
         yield
     finally:
         settings.auth.api_keys = original
+
+
+@pytest.fixture(autouse=True)
+def isolate_sqlite_db() -> Iterator[None]:
+    test_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
+
+    def _get_test_db() -> Iterator[Session]:
+        db = test_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _get_test_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        Base.metadata.drop_all(bind=test_engine)
+        test_engine.dispose()
 
 
 @pytest.fixture
