@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.auth import require_ws_api_key
@@ -194,10 +194,12 @@ async def transcribe_stream(
     豆包流式转写。客户端发送 PCM（16k/16bit/mono），服务端返回
     ``{"text": "当前全文", "is_final": false}``。Ark 配置有效且 use_llm 为 true 时做纠错（use_llm 由后端配置决定）。
     """
-    if not await require_ws_api_key(ws):
+    try:
+        await require_ws_api_key(ws)
+        await ws.accept()
+    except HTTPException:
         return
 
-    await ws.accept()
     logger.info(
         f"transcribe stream ws connected {settings.volcengine.ark_valid=} {effect=} {use_llm=}"
     )
