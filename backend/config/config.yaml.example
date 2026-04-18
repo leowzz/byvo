@@ -2,6 +2,11 @@
 
 database_url: sqlite:///./byvo.db
 
+auth:
+  # 所有客户端请求必须在 X-API-Key 中携带下列任一 key
+  api_keys:
+    - "replace-with-your-api-key"
+
 volcengine:
   app_key: ""
   access_key: ""

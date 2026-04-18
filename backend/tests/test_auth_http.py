@@ -21,3 +21,14 @@ def test_transcribe_rejects_invalid_api_key(client):
 
     assert response.status_code == 401
     assert response.json() == {"detail": "invalid api key"}
+
+
+def test_transcribe_accepts_valid_api_key(client):
+    response = client.post(
+        "/api/v1/transcribe",
+        files={"audio": _wav_file()},
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["text"] == "ok"
