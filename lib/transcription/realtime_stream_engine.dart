@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:record/record.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/backend_config.dart';
@@ -84,16 +84,13 @@ class RealtimeStreamEngine {
 
     DebugLog.instance.logApi('实时', 'WS connect $uri');
     try {
-      final socket = await WebSocket.connect(
-        uri.toString(),
+      _channel = IOWebSocketChannel.connect(
+        uri,
         headers: <String, dynamic>{'X-API-Key': apiKey.trim()},
       );
-      _channel = WebSocketChannel.fromSocket(socket);
       await _channel!.ready;
-    } on WebSocketException catch (e) {
+    } on WebSocketChannelException catch (e) {
       throw StateError('实时转写认证失败: $e');
-    } on SocketException catch (e) {
-      throw StateError('实时转写连接失败: $e');
     }
     DebugLog.instance.logApi('实时', 'WS connected');
 
