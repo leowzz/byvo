@@ -29,6 +29,7 @@ async def require_ws_api_key(ws: WebSocket) -> None:
     if _is_valid_api_key(ws.headers.get(API_KEY_HEADER)):
         return
     logger.warning("websocket auth failed: invalid or missing api key")
+    await ws.accept()
     await ws.close(code=status.WS_1008_POLICY_VIOLATION)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
