@@ -64,7 +64,8 @@ class TranscriptionMvpPage extends StatefulWidget {
 
 class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     with WidgetsBindingObserver {
-  static const BackendTranscriptionEngine _engine = BackendTranscriptionEngine();
+  static const BackendTranscriptionEngine _engine =
+      BackendTranscriptionEngine();
 
   String? _audioPath;
   bool _isTranscribing = false;
@@ -114,21 +115,26 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   Future<void> _initOverlayLogPathAndPoll() async {
-    String? path = (await SharedPreferences.getInstance()).getString(kOverlayDebugLogPathKey);
+    String? path = (await SharedPreferences.getInstance())
+        .getString(kOverlayDebugLogPathKey);
     if (path == null || path.isEmpty) {
       final Directory d = await getTemporaryDirectory();
       path = '${d.path}${Platform.pathSeparator}$kOverlayDebugLogFileName';
-      await (await SharedPreferences.getInstance()).setString(kOverlayDebugLogPathKey, path);
+      await (await SharedPreferences.getInstance())
+          .setString(kOverlayDebugLogPathKey, path);
     }
     if (!mounted) return;
     _overlayLogFilePath = path;
-    _overlayLogPollTimer = Timer.periodic(const Duration(milliseconds: 800), (_) => _pollOverlayLog());
+    _overlayLogPollTimer = Timer.periodic(
+        const Duration(milliseconds: 800), (_) => _pollOverlayLog());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _pollOverlayLog();
-    if (state != AppLifecycleState.resumed || !_showFloatingBall || !Platform.isAndroid) return;
+    if (state != AppLifecycleState.resumed ||
+        !_showFloatingBall ||
+        !Platform.isAndroid) return;
     Future<void>.microtask(() async {
       try {
         if (!mounted) return;
@@ -155,7 +161,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     setState(() => _showFloatingBall = show);
     if (show && Platform.isAndroid) {
       try {
-        if (!await FlutterOverlayWindow.isActive()) await _doShowGlobalOverlay();
+        if (!await FlutterOverlayWindow.isActive())
+          await _doShowGlobalOverlay();
       } catch (_) {}
     }
   }
@@ -202,9 +209,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   void _requestInsertTextToFocusedField(String text) {
     if (!Platform.isAndroid) return;
     unawaited(
-      _insertTextChannel
-          .invokeMethod<bool>('insertTextToFocusedField', {'text': text})
-          .catchError((Object e, StackTrace st) {
+      _insertTextChannel.invokeMethod<bool>('insertTextToFocusedField',
+          {'text': text}).catchError((Object e, StackTrace st) {
         if (kDebugMode) DebugLog.instance.log('填入输入框失败: $e');
         return null;
       }),
@@ -252,7 +258,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   Future<void> _startRecording() async {
     if (!await _requireMicPermission()) return;
     final Directory tempDir = await getTemporaryDirectory();
-    final String path = '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final String path =
+        '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _recorder.start(
       const RecordConfig(encoder: AudioEncoder.wav),
       path: path,
@@ -286,7 +293,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final Duration duration = DateTime.now().difference(startTime);
     if (duration < _holdRecordMinDuration) {
       if (kDebugMode) debugPrint('[按钮] 长按录音=太短 ${duration.inMilliseconds}ms');
-      _safeSetState(() => _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms');
+      _safeSetState(() =>
+          _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms');
       return;
     }
     _safeSetState(() {
@@ -416,7 +424,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     }
   }
 
-  Future<void> _onFloatingBallSwitchChanged(BuildContext context, bool value) async {
+  Future<void> _onFloatingBallSwitchChanged(
+      BuildContext context, bool value) async {
     if (value) {
       if (!Platform.isAndroid) {
         if (mounted && context.mounted) {
@@ -504,10 +513,16 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
           children: [
             Container(
               height: kToolbarHeight + MediaQuery.of(context).padding.top,
-              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 8, 16, 8),
-              decoration: BoxDecoration(color: Theme.of(context).colorScheme.inversePrimary.withOpacity(0.3)),
+              padding: EdgeInsets.fromLTRB(
+                  16, MediaQuery.of(context).padding.top + 8, 16, 8),
+              decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .inversePrimary
+                      .withOpacity(0.3)),
               alignment: Alignment.centerLeft,
-              child: const Text('设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              child: const Text('设置',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
             ListTile(
               title: const Text('悬浮球'),
@@ -543,7 +558,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                   ),
                   SizedBox(
                     width: 36,
-                    child: Text('$_idleTimeoutSec', textAlign: TextAlign.center),
+                    child:
+                        Text('$_idleTimeoutSec', textAlign: TextAlign.center),
                   ),
                   IconButton(
                     icon: const Icon(Icons.add),
@@ -566,148 +582,184 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
           Expanded(
             flex: 7,
             child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () => _openBackendSettings(context),
-                        icon: const Icon(Icons.settings),
-                        label: const Text('后端地址配置'),
+              padding: const EdgeInsets.all(16),
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _openBackendSettings(context),
+                  icon: const Icon(Icons.settings),
+                  label: const Text('后端地址配置'),
+                ),
+                const SizedBox(height: 16),
+                const Text('测试填入（悬浮球转写会填入此处）',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                TextField(
+                  controller: _testInputController,
+                  decoration: const InputDecoration(
+                    hintText: '点一下获得焦点，再用悬浮球长按录音转写',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  maxLines: 3,
+                  minLines: 1,
+                ),
+                const SizedBox(height: 24),
+                const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(
+                  _audioPath != null
+                      ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
+                      : '录制后点击转写',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: _isTranscribing || _isRealtimeTranscribing
+                          ? null
+                          : (_holdRecordStartTime != null
+                              ? null
+                              : _isRecording
+                                  ? () => _stopRecording(context)
+                                  : _startRecording),
+                      icon: Icon(
+                        _isRealtimeTranscribing
+                            ? Icons.mic
+                            : (_isRecording && _holdRecordStartTime == null
+                                ? Icons.stop
+                                : Icons.mic),
                       ),
-                      const SizedBox(height: 16),
-                      const Text('测试填入（悬浮球转写会填入此处）', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      TextField(
-                        controller: _testInputController,
-                        decoration: const InputDecoration(
-                          hintText: '点一下获得焦点，再用悬浮球长按录音转写',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        maxLines: 3,
-                        minLines: 1,
+                      label: Text(
+                        _isRealtimeTranscribing
+                            ? '录制'
+                            : (_isRecording && _holdRecordStartTime == null
+                                ? '停止录制'
+                                : '录制'),
                       ),
-                      const SizedBox(height: 24),
-                      const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(
-                        _audioPath != null
-                            ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
-                            : '录制后点击转写',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                    ),
+                    GestureDetector(
+                      onPanDown: (_) {
+                        if (_isTranscribing ||
+                            _isRealtimeTranscribing ||
+                            _isRecording) return;
+                        _holdRecordStartTime = DateTime.now();
+                        if (kDebugMode) debugPrint('[按钮] 长按录音=按下');
+                        _startRecording();
+                      },
+                      onPanEnd: (_) => _stopHoldAndTranscribe(context),
+                      onPanCancel: () => _stopHoldAndTranscribe(context),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          FilledButton.icon(
-                            onPressed: _isTranscribing || _isRealtimeTranscribing
-                                ? null
-                                : (_holdRecordStartTime != null
-                                    ? null
-                                    : _isRecording
-                                        ? () => _stopRecording(context)
-                                        : _startRecording),
-                            icon: Icon(
-                              _isRealtimeTranscribing
-                                  ? Icons.mic
-                                  : (_isRecording && _holdRecordStartTime == null ? Icons.stop : Icons.mic),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _holdRecordStartTime != null
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .primaryContainer,
                             ),
-                            label: Text(
-                              _isRealtimeTranscribing
-                                  ? '录制'
-                                  : (_isRecording && _holdRecordStartTime == null ? '停止录制' : '录制'),
-                            ),
-                          ),
-                          GestureDetector(
-                            onPanDown: (_) {
-                              if (_isTranscribing || _isRealtimeTranscribing || _isRecording) return;
-                              _holdRecordStartTime = DateTime.now();
-                              if (kDebugMode) debugPrint('[按钮] 长按录音=按下');
-                              _startRecording();
-                            },
-                            onPanEnd: (_) => _stopHoldAndTranscribe(context),
-                            onPanCancel: () => _stopHoldAndTranscribe(context),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                AnimatedContainer(
-                                  duration: const Duration(milliseconds: 150),
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _holdRecordStartTime != null
-                                        ? Theme.of(context).colorScheme.surfaceContainerHighest
-                                        : Theme.of(context).colorScheme.primaryContainer,
-                                  ),
-                                  child: Icon(
-                                    _holdRecordStartTime != null ? Icons.stop : Icons.mic_none,
-                                    color: _holdRecordStartTime != null
-                                        ? Theme.of(context).colorScheme.onSurfaceVariant
-                                        : Theme.of(context).colorScheme.onPrimaryContainer,
-                                    size: 28,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '长按录音转写',
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ],
+                            child: Icon(
+                              _holdRecordStartTime != null
+                                  ? Icons.stop
+                                  : Icons.mic_none,
+                              color: _holdRecordStartTime != null
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer,
+                              size: 28,
                             ),
                           ),
-                          FilledButton.icon(
-                            onPressed: _isRealtimeTranscribing
-                                ? _stopRealtimeTranscribe
-                                : (_isTranscribing || _isRecording ? null : () => _startRealtimeTranscribe(context)),
-                            icon: _isRealtimeTranscribing ? const Icon(Icons.stop_circle) : const Icon(Icons.record_voice_over),
-                            label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      FilledButton.icon(
-                        onPressed: (_isTranscribing || _isRealtimeTranscribing || !canTranscribe) ? null : () => _transcribe(context),
-                        icon: _isTranscribing
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.transcribe),
-                        label: Text(_isTranscribing ? '转写中…' : '转写'),
-                      ),
-                      if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
-                        const SizedBox(height: 24),
-                        const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
-                        if (_realtimeConnectionClosed) ...[
-                          if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
-                          Text('已关闭', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.outline)),
-                        ],
-                      ],
-                      if (_error != null) ...[
-                        const SizedBox(height: 16),
-                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                      ],
-                      if (_result != null) ...[
-                        const SizedBox(height: 24),
-                        const Text('转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        SelectableText(_result!.text),
-                        if (_result!.emotion != null || _result!.event != null) ...[
-                          const SizedBox(height: 12),
-                          const Text('情感 / 环境', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 4),
                           Text(
-                            '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
-                            style: Theme.of(context).textTheme.bodySmall,
+                            '长按录音转写',
+                            style: Theme.of(context).textTheme.labelSmall,
                           ),
                         ],
-                        if (_result!.lang != null) ...[
-                          const SizedBox(height: 4),
-                          Text('语种: ${_result!.lang}', style: Theme.of(context).textTheme.bodySmall),
-                        ],
-                      ],
-                    ],
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _isRealtimeTranscribing
+                          ? _stopRealtimeTranscribe
+                          : (_isTranscribing || _isRecording
+                              ? null
+                              : () => _startRealtimeTranscribe(context)),
+                      icon: _isRealtimeTranscribing
+                          ? const Icon(Icons.stop_circle)
+                          : const Icon(Icons.record_voice_over),
+                      label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: (_isTranscribing ||
+                          _isRealtimeTranscribing ||
+                          !canTranscribe)
+                      ? null
+                      : () => _transcribe(context),
+                  icon: _isTranscribing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.transcribe),
+                  label: Text(_isTranscribing ? '转写中…' : '转写'),
+                ),
+                if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
+                  const SizedBox(height: 24),
+                  const Text('实时转写结果',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
+                  if (_realtimeConnectionClosed) ...[
+                    if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
+                    Text('已关闭',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline)),
+                  ],
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(_error!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error)),
+                ],
+                if (_result != null) ...[
+                  const SizedBox(height: 24),
+                  const Text('转写结果',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  SelectableText(_result!.text),
+                  if (_result!.emotion != null || _result!.event != null) ...[
+                    const SizedBox(height: 12),
+                    const Text('情感 / 环境',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  if (_result!.lang != null) ...[
+                    const SizedBox(height: 4),
+                    Text('语种: ${_result!.lang}',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ],
+              ],
             ),
           ),
           Expanded(
@@ -772,7 +824,8 @@ class _DebugLogPanelState extends State<_DebugLogPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
-                Icon(Icons.bug_report, size: 18, color: theme.colorScheme.primary),
+                Icon(Icons.bug_report,
+                    size: 18, color: theme.colorScheme.primary),
                 const SizedBox(width: 6),
                 Text('调试日志', style: theme.textTheme.titleSmall),
                 const Spacer(),
@@ -818,19 +871,25 @@ class _BackendSettingsDialog extends StatefulWidget {
 
 class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
   late final TextEditingController _urlController;
+  late final TextEditingController _apiKeyController;
 
   @override
   void initState() {
     super.initState();
     _urlController = TextEditingController();
+    _apiKeyController = TextEditingController();
     loadBackendUrl().then((String url) {
       if (mounted) _urlController.text = url;
+    });
+    loadBackendApiKey().then((String key) {
+      if (mounted) _apiKeyController.text = key;
     });
   }
 
   @override
   void dispose() {
     _urlController.dispose();
+    _apiKeyController.dispose();
     super.dispose();
   }
 
@@ -851,6 +910,15 @@ class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
               ),
               keyboardType: TextInputType.url,
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKeyController,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                hintText: '输入服务端要求的 X-API-Key',
+              ),
+              obscureText: true,
+            ),
           ],
         ),
       ),
@@ -862,6 +930,7 @@ class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
         FilledButton(
           onPressed: () async {
             await saveBackendUrl(_urlController.text.trim());
+            await saveBackendApiKey(_apiKeyController.text.trim());
             if (context.mounted) Navigator.of(context).pop(true);
           },
           child: const Text('保存'),
@@ -898,7 +967,8 @@ class OverlayBallPage extends StatefulWidget {
 
 class _OverlayBallPageState extends State<OverlayBallPage> {
   final AudioRecorder _recorder = AudioRecorder();
-  static const BackendTranscriptionEngine _engine = BackendTranscriptionEngine();
+  static const BackendTranscriptionEngine _engine =
+      BackendTranscriptionEngine();
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
   DateTime? _holdRecordStartTime;
   String? _overlayLogFilePath;
@@ -954,7 +1024,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     }
     FlutterOverlayWindow.shareData('$prefix(共${text.length}字)');
     for (int i = 0; i < text.length; i += chunkSize) {
-      final String chunk = text.substring(i, (i + chunkSize).clamp(0, text.length));
+      final String chunk =
+          text.substring(i, (i + chunkSize).clamp(0, text.length));
       FlutterOverlayWindow.shareData(chunk);
     }
   }
@@ -966,7 +1037,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       final Directory tempDir = await getTemporaryDirectory();
       final String path =
           '${tempDir.path}${Platform.pathSeparator}overlay_record_${DateTime.now().millisecondsSinceEpoch}.wav';
-      await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: path);
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav),
+          path: path);
       if (mounted) {
         setState(() => _holdRecordStartTime = DateTime.now());
         _log('[悬浮球] 录制=开始');
@@ -1000,7 +1072,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     try {
       _log('[悬浮球] 转写=开始');
       final effect = await loadEffectTranscribe();
-      final result = await _engine.transcribe(path, effect: effect, useLlm: effect);
+      final result =
+          await _engine.transcribe(path, effect: effect, useLlm: effect);
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
       FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');

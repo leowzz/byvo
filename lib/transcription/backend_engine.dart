@@ -26,6 +26,13 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     bool useLlm = false,
   }) async {
     final baseUrl = await loadBackendUrl();
+    if (baseUrl.trim().isEmpty) {
+      throw StateError('请先配置后端地址');
+    }
+    final apiKey = await loadBackendApiKey();
+    if (apiKey.trim().isEmpty) {
+      throw StateError('请先配置 API Key');
+    }
     final uri = Uri.parse('$baseUrl/api/v1/transcribe').replace(
       queryParameters: <String, String>{
         'effect': effect ? 'true' : 'false',
@@ -38,12 +45,17 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     }
     DebugLog.instance.logApi('转写', 'POST $uri');
     final request = http.MultipartRequest('POST', uri)
+      ..headers['X-API-Key'] = apiKey.trim()
       ..files.add(await http.MultipartFile.fromPath('audio', audioPath));
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     final body = response.body;
 
+    if (response.statusCode == 401) {
+      DebugLog.instance.logApi('转写', '401 $body');
+      throw StateError('后端认证失败：请检查 API Key');
+    }
     if (response.statusCode != 200) {
       DebugLog.instance.logApi('转写', '${response.statusCode} $body');
       throw Exception('后端转写失败: ${response.statusCode} $body');

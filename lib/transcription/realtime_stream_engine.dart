@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:record/record.dart';
@@ -20,8 +21,10 @@ class RealtimeStreamEngine {
   WebSocketChannel? _channel;
   StreamSubscription<Uint8List>? _recordSub;
   StreamSubscription? _wsSub;
-  final StreamController<String> _textController = StreamController<String>.broadcast();
-  final StreamController<void> _connectionClosedController = StreamController<void>.broadcast();
+  final StreamController<String> _textController =
+      StreamController<String>.broadcast();
+  final StreamController<void> _connectionClosedController =
+      StreamController<void>.broadcast();
   bool _stopping = false;
   bool _connectionClosedEmitted = false;
   DateTime? _lastAudioSentAt;
@@ -38,7 +41,8 @@ class RealtimeStreamEngine {
     if (_lastAudioSentAt == null || _lastResponseAt == null) return false;
     final now = DateTime.now();
     const d = Duration(seconds: 1);
-    return now.difference(_lastAudioSentAt!) >= d && now.difference(_lastResponseAt!) >= d;
+    return now.difference(_lastAudioSentAt!) >= d &&
+        now.difference(_lastResponseAt!) >= d;
   }
 
   /// 开始流式转写，连接后端 WS 并开始录音。
@@ -54,6 +58,13 @@ class RealtimeStreamEngine {
     if (_recorder != null) return;
 
     final baseUrl = await loadBackendUrl();
+    if (baseUrl.trim().isEmpty) {
+      throw StateError('请先配置后端地址');
+    }
+    final apiKey = await loadBackendApiKey();
+    if (apiKey.trim().isEmpty) {
+      throw StateError('请先配置 API Key');
+    }
     final wsUrl = backendUrlToWebSocket(baseUrl);
     final params = <String, String>{
       'effect': effect ? 'true' : 'false',
@@ -72,8 +83,18 @@ class RealtimeStreamEngine {
     _lastResponseAt = DateTime.now();
 
     DebugLog.instance.logApi('实时', 'WS connect $uri');
-    _channel = WebSocketChannel.connect(uri);
-    await _channel!.ready;
+    try {
+      final socket = await WebSocket.connect(
+        uri.toString(),
+        headers: <String, dynamic>{'X-API-Key': apiKey.trim()},
+      );
+      _channel = WebSocketChannel.fromSocket(socket);
+      await _channel!.ready;
+    } on WebSocketException catch (e) {
+      throw StateError('实时转写认证失败: $e');
+    } on SocketException catch (e) {
+      throw StateError('实时转写连接失败: $e');
+    }
     DebugLog.instance.logApi('实时', 'WS connected');
 
     final stream = await _recorder!.startStream(
@@ -122,7 +143,8 @@ class RealtimeStreamEngine {
           }
           final text = json['text'] as String?;
           if (text != null) {
-            DebugLog.instance.logApi('实时', '<- text: ${text.length}字 "${_truncate(text, 40)}"');
+            DebugLog.instance.logApi(
+                '实时', '<- text: ${text.length}字 "${_truncate(text, 40)}"');
             _textController.add(text);
           } else {
             DebugLog.instance.logApi('实时', '<- $message');
