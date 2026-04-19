@@ -7,9 +7,15 @@ const String _keyBackendApiKey = 'backend_api_key';
 
 const String kDefaultBackendUrl = '';
 
+Future<SharedPreferences> _getFreshPrefs() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.reload();
+  return prefs;
+}
+
 /// 从 SharedPreferences 读取后端 base URL。
 Future<String> loadBackendUrl() async {
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = await _getFreshPrefs();
   return prefs.getString(_keyBackendUrl) ?? kDefaultBackendUrl;
 }
 
@@ -21,7 +27,7 @@ Future<void> saveBackendUrl(String url) async {
 
 /// 从 SharedPreferences 读取后端 API key。
 Future<String> loadBackendApiKey() async {
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = await _getFreshPrefs();
   return prefs.getString(_keyBackendApiKey) ?? '';
 }
 
@@ -35,8 +41,8 @@ const String _keyEffectTranscribe = 'effect_transcribe';
 
 /// 是否开启效果转写（去口语化/语义顺滑）。
 Future<bool> loadEffectTranscribe() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getBool(_keyEffectTranscribe) ?? false;
+  final prefs = await _getFreshPrefs();
+  return prefs.getBool(_keyEffectTranscribe) ?? true;
 }
 
 /// 保存效果转写开关。
@@ -49,7 +55,7 @@ const String _keyIdleTimeoutSec = 'transcribe_idle_timeout_sec';
 
 /// 无新识别内容超过该秒数则断开连接（默认 30）。
 Future<int> loadIdleTimeoutSec() async {
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = await _getFreshPrefs();
   final v = prefs.getInt(_keyIdleTimeoutSec);
   return v ?? 30;
 }

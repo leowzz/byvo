@@ -2,6 +2,7 @@ package cn.wleo.byvo.insert_text
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -12,6 +13,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -59,6 +61,33 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 vibrate(ctx, durationMs)
                 result.success(true)
             }
+            "hasMicrophonePermission" -> {
+                result.success(
+                    ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) ==
+                        PackageManager.PERMISSION_GRANTED
+                )
+            }
+            "requestMicrophonePermission" -> {
+                Toast.makeText(
+                    ctx,
+                    "请允许麦克风权限后再使用悬浮球录音",
+                    Toast.LENGTH_LONG
+                ).show()
+                val launchIntent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                if (launchIntent == null) {
+                    result.success(false)
+                    return
+                }
+                launchIntent
+                    .putExtra("request_mic_permission", true)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    )
+                ctx.startActivity(launchIntent)
+                result.success(true)
+            }
             "openAccessibilitySettings" -> {
                 Toast.makeText(
                     ctx,
@@ -69,7 +98,7 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     ctx.startActivity(intent)
-                }, 1200)
+                }, 300)
                 result.success(true)
             }
             else -> result.notImplemented()
