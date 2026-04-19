@@ -33,6 +33,9 @@ const String _insertTextPrefix = 'INSERT_TEXT:\n';
 final MethodChannel _insertTextChannel = MethodChannel('byvo/insert_text');
 const BackendTranscriptionEngine _sharedBackendEngine =
     BackendTranscriptionEngine();
+@visibleForTesting
+const ValueKey<String> homeHoldToTranscribeKey =
+    ValueKey<String>('home_hold_to_transcribe');
 bool defaultPlatformIsAndroid() => Platform.isAndroid;
 
 @visibleForTesting
@@ -52,6 +55,21 @@ Future<TranscriptionResult> _transcribeAudioWithCurrentSettings(
     effect: effect,
     useLlm: effect,
   );
+}
+
+Future<void> _triggerNativeVibration({int durationMs = 12}) async {
+  if (!debugPlatformIsAndroid()) {
+    await HapticFeedback.vibrate();
+    return;
+  }
+  try {
+    await _insertTextChannel.invokeMethod<void>(
+      'vibrate',
+      <String, dynamic>{'durationMs': durationMs},
+    );
+  } catch (_) {
+    await HapticFeedback.vibrate();
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -108,7 +126,29 @@ class MyApp extends StatelessWidget {
 }
 
 class TranscriptionMvpPage extends StatefulWidget {
-  const TranscriptionMvpPage({super.key});
+  const TranscriptionMvpPage({
+    super.key,
+    this.recorder,
+    this.tempDirProvider,
+    this.transcribeAudio,
+    this.onRecordStartFeedback,
+    this.onRecordStopFeedback,
+  });
+
+  @visibleForTesting
+  final AudioRecorder? recorder;
+
+  @visibleForTesting
+  final Future<Directory> Function()? tempDirProvider;
+
+  @visibleForTesting
+  final Future<TranscriptionResult> Function(String audioPath)? transcribeAudio;
+
+  @visibleForTesting
+  final Future<void> Function()? onRecordStartFeedback;
+
+  @visibleForTesting
+  final Future<void> Function()? onRecordStopFeedback;
 
   @override
   State<TranscriptionMvpPage> createState() => _TranscriptionMvpPageState();
@@ -127,7 +167,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   bool _isRealtimeTranscribing = false;
   bool _realtimeConnectionClosed = false;
   String _realtimeText = '';
-  final AudioRecorder _recorder = AudioRecorder();
+  late final AudioRecorder _recorder;
   RealtimeStreamEngine? _realtimeStreamEngine;
   StreamSubscription<String>? _realtimeTextSub;
   StreamSubscription<void>? _realtimeClosedSub;
@@ -150,6 +190,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   @override
   void initState() {
     super.initState();
+    _recorder = widget.recorder ?? AudioRecorder();
     _urlController = TextEditingController();
     _apiKeyController = TextEditingController();
     WidgetsBinding.instance.addObserver(this);
@@ -300,7 +341,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
 
   Future<void> _startRecording() async {
     if (!await _requireMicPermission()) return;
-    final Directory tempDir = await getTemporaryDirectory();
+    final Directory tempDir =
+        await (widget.tempDirProvider?.call() ?? getTemporaryDirectory());
     final String path =
         '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _recorder.start(
@@ -333,6 +375,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _holdRecordStartTime = null;
     final String? path = await _recorder.stop();
     _safeSetState(() => _isRecording = false);
+    await (widget.onRecordStopFeedback?.call() ?? _triggerNativeVibration());
     logDebug('[按钮] 长按录音=松手 path=${path != null}');
     if (path == null) return;
     final Duration duration = DateTime.now().difference(startTime);
@@ -369,7 +412,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     logDebug('[按钮] 转写=开始');
     try {
       final TranscriptionResult result =
-          await _transcribeAudioWithCurrentSettings(_audioPath!);
+          await (widget.transcribeAudio?.call(_audioPath!) ??
+              _transcribeAudioWithCurrentSettings(_audioPath!));
       _safeSetState(() {
         _isTranscribing = false;
         _result = result;
@@ -791,6 +835,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                     ),
                   ),
                   GestureDetector(
+                    key: homeHoldToTranscribeKey,
                     onPanDown: (_) {
                       if (_isTranscribing ||
                           _isRealtimeTranscribing ||
@@ -799,6 +844,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                       }
                       _holdRecordStartTime = DateTime.now();
                       logDebug('[按钮] 长按录音=按下');
+                      unawaited(
+                        widget.onRecordStartFeedback?.call() ??
+                            _triggerNativeVibration(),
+                      );
                       _startRecording();
                     },
                     onPanEnd: (_) => _stopHoldAndTranscribe(context),
@@ -1266,16 +1315,44 @@ void overlayMain() {
 /// 全局悬浮窗内的球：与主页面「长按录音转写」一致，长按录音、松手停止并调用 POST 转写接口。
 /// 不调用 resizeOverlay（插件会把 180 当 dp 转成像素，球会突然变大）。拖动由原生 enableDrag 处理。
 class OverlayBallPage extends StatefulWidget {
-  const OverlayBallPage({super.key});
+  const OverlayBallPage({
+    super.key,
+    this.recorder,
+    this.tempDirProvider,
+    this.transcribeAudio,
+    this.onRecordStartFeedback,
+    this.onRecordStopFeedback,
+  });
+
+  @visibleForTesting
+  final AudioRecorder? recorder;
+
+  @visibleForTesting
+  final Future<Directory> Function()? tempDirProvider;
+
+  @visibleForTesting
+  final Future<TranscriptionResult> Function(String audioPath)? transcribeAudio;
+
+  @visibleForTesting
+  final Future<void> Function()? onRecordStartFeedback;
+
+  @visibleForTesting
+  final Future<void> Function()? onRecordStopFeedback;
 
   @override
   State<OverlayBallPage> createState() => _OverlayBallPageState();
 }
 
 class _OverlayBallPageState extends State<OverlayBallPage> {
-  final AudioRecorder _recorder = AudioRecorder();
+  late final AudioRecorder _recorder;
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
   DateTime? _holdRecordStartTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _recorder = widget.recorder ?? AudioRecorder();
+  }
 
   void _log(String msg) {
     if (!kDebugMode) return;
@@ -1304,13 +1381,16 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
   /// 直接尝试 start，失败再视为无权限。
   Future<void> _startHoldRecord() async {
     try {
-      final Directory tempDir = await getTemporaryDirectory();
+      final Directory tempDir =
+          await (widget.tempDirProvider?.call() ?? getTemporaryDirectory());
       final String path =
           '${tempDir.path}${Platform.pathSeparator}overlay_record_${DateTime.now().millisecondsSinceEpoch}.wav';
       await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav),
           path: path);
       if (mounted) {
         setState(() => _holdRecordStartTime = DateTime.now());
+        await (widget.onRecordStartFeedback?.call() ??
+            _triggerNativeVibration());
         _log('[悬浮球] 录制=开始');
       }
     } catch (e) {
@@ -1330,6 +1410,7 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     _holdRecordStartTime = null;
     final String? path = await _recorder.stop();
     if (mounted) setState(() {});
+    await (widget.onRecordStopFeedback?.call() ?? _triggerNativeVibration());
     if (path == null) {
       _log('[悬浮球] 松手=无路径');
       return;
@@ -1341,7 +1422,9 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     }
     try {
       _log('[悬浮球] 转写=开始');
-      final result = await _transcribeAudioWithCurrentSettings(path);
+      final result =
+          await (widget.transcribeAudio?.call(path) ??
+              _transcribeAudioWithCurrentSettings(path));
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
       FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');

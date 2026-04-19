@@ -2,8 +2,12 @@ package com.example.byvo.insert_text
 
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
@@ -49,6 +53,12 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "isAccessibilityServiceEnabled" -> {
                 result.success(isAccessibilityServiceEnabled(ctx))
             }
+            "vibrate" -> {
+                val durationMs = (call.argument<Number>("durationMs")?.toLong() ?: 12L)
+                    .coerceIn(1L, 50L)
+                vibrate(ctx, durationMs)
+                result.success(true)
+            }
             "openAccessibilitySettings" -> {
                 Toast.makeText(
                     ctx,
@@ -75,6 +85,35 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
         return manager.isEnabled && enabledServices.split(':').any { it.equals(target, ignoreCase = true) }
+    }
+
+    private fun vibrate(ctx: android.content.Context, durationMs: Long) {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val manager = ctx.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE)
+                    as? VibratorManager
+                manager?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? Vibrator
+            } ?: return
+
+            if (!vibrator.hasVibrator()) return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                        durationMs,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(durationMs)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "vibrate failed", t)
+        }
     }
 
     companion object {
