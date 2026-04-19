@@ -39,9 +39,13 @@ dependencies:
   web_socket_channel: ^3.0.1
   shared_preferences: ^2.2.2
   http: ^1.2.0
+  dio: ^5.7.0
   permission_handler: ^11.0.0
   flutter_overlay_window: ^0.5.0
   mobile_scanner: 5.2.3
+  talker: ^4.5.2
+  talker_dio_logger: ^4.5.2
+  talker_flutter: ^4.5.2
   byvo_insert_text:
     path: packages/byvo_insert_text
 

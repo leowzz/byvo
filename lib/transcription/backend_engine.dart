@@ -1,16 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:talker_dio_logger/talker_dio_logger.dart';
 
+import '../app_talker.dart';
 import '../config/backend_config.dart';
-import '../debug_log.dart';
 import 'transcription_engine.dart';
 import 'transcription_result.dart';
 
 /// 后端转写引擎：音频 POST 到 FastAPI，豆包 ASR。
 class BackendTranscriptionEngine implements TranscriptionEngine {
   const BackendTranscriptionEngine();
+
+  static final Dio _dio = Dio()
+    ..interceptors.addAll(<Interceptor>[
+      if (kDebugMode) TalkerDioLogger(talker: appTalker),
+    ]);
 
   @override
   String get displayName => '豆包';
@@ -43,21 +50,32 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     if (!await file.exists()) {
       throw StateError('音频文件不存在: $audioPath');
     }
-    DebugLog.instance.logApi('转写', 'POST $uri');
-    final request = http.MultipartRequest('POST', uri)
-      ..headers['X-API-Key'] = apiKey.trim()
-      ..files.add(await http.MultipartFile.fromPath('audio', audioPath));
-
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
-    final body = response.body;
+    logInfo('[转写] POST $uri');
+    late final Response<String> response;
+    try {
+      response = await _dio.post<String>(
+        uri.toString(),
+        data: FormData.fromMap(<String, Object>{
+          'audio': await MultipartFile.fromFile(audioPath),
+        }),
+        options: Options(
+          headers: <String, String>{'X-API-Key': apiKey.trim()},
+          responseType: ResponseType.plain,
+          validateStatus: (_) => true,
+        ),
+      );
+    } on DioException catch (e, st) {
+      logError(e, st, '[转写] 请求失败');
+      rethrow;
+    }
+    final body = response.data ?? '';
 
     if (response.statusCode == 401) {
-      DebugLog.instance.logApi('转写', '401 $body');
+      logWarning('[转写] 401 $body');
       throw StateError('后端认证失败：请检查 API Key');
     }
     if (response.statusCode != 200) {
-      DebugLog.instance.logApi('转写', '${response.statusCode} $body');
+      logWarning('[转写] ${response.statusCode} $body');
       throw Exception('后端转写失败: ${response.statusCode} $body');
     }
 
@@ -66,9 +84,8 @@ class BackendTranscriptionEngine implements TranscriptionEngine {
     final emotion = json['emotion'] as String?;
     final event = json['event'] as String?;
     final lang = json['lang'] as String?;
-    DebugLog.instance.logApi(
-      '转写',
-      '200 OK | text=${text.length}字 emotion=$emotion event=$event lang=$lang',
+    logInfo(
+      '[转写] 200 OK | text=${text.length}字 emotion=$emotion event=$event lang=$lang',
     );
     return TranscriptionResult(
       text: text,
