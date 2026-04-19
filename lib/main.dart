@@ -42,6 +42,11 @@ bool defaultPlatformIsAndroid() => Platform.isAndroid;
 
 @visibleForTesting
 bool Function() debugPlatformIsAndroid = defaultPlatformIsAndroid;
+@visibleForTesting
+Future<void> Function({
+  required String baseUrl,
+  required String apiKey,
+}) debugVerifyBackendConnection = verifyBackendConnection;
 
 class _RuntimeStatus {
   const _RuntimeStatus({
@@ -49,12 +54,14 @@ class _RuntimeStatus {
     required this.label,
     required this.active,
     required this.icon,
+    this.latencyMs,
   });
 
   final String title;
   final String label;
   final bool active;
   final IconData icon;
+  final int? latencyMs;
 }
 
 void main() {
@@ -276,7 +283,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       );
     } else {
       try {
-        await verifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
+        await debugVerifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
         backendStatus = const _RuntimeStatus(
           title: '后端服务',
           label: '已连接',
@@ -353,6 +360,74 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         builder: (_) => TalkerScreen(talker: appTalker),
       ),
     );
+  }
+
+  Future<void> _handleBackendStatusTap(BuildContext context) async {
+    final String baseUrl = _urlController.text.trim();
+    final String apiKey = _apiKeyController.text.trim();
+    if (baseUrl.isEmpty || apiKey.isEmpty) {
+      if (_tabIndex != 1) {
+        setState(() => _tabIndex = 1);
+      }
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    final startedAt = DateTime.now();
+    try {
+      await debugVerifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
+      final latencyMs = DateTime.now().difference(startedAt).inMilliseconds;
+      if (!mounted) return;
+      setState(() {
+        _backendStatus = _RuntimeStatus(
+          title: '后端服务',
+          label: '已连接',
+          active: true,
+          icon: Icons.cloud_done_outlined,
+          latencyMs: latencyMs,
+        );
+      });
+    } catch (e) {
+      if (!context.mounted) return;
+      messenger.clearSnackBars();
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Bad state: ', ''))),
+      );
+      if (!mounted) return;
+      setState(() {
+        _backendStatus = _RuntimeStatus(
+          title: '后端服务',
+          label: e.toString().replaceFirst('Bad state: ', ''),
+          active: false,
+          icon: Icons.cloud_off_outlined,
+        );
+      });
+    }
+  }
+
+  Future<void> _handlePermissionStatusTap(
+    BuildContext context,
+    _RuntimeStatus status,
+  ) async {
+    if (status.title == '录音权限') {
+      await _recorder.hasPermission();
+      await _refreshHomeStatuses();
+      return;
+    }
+    if (status.title == '无障碍') {
+      await _insertTextChannel.invokeMethod<void>('openAccessibilitySettings');
+      return;
+    }
+    if (status.title == '悬浮球权限') {
+      if (!debugPlatformIsAndroid()) {
+        return;
+      }
+      try {
+        await FlutterOverlayWindow.requestPermission();
+      } catch (_) {}
+      await _refreshHomeStatuses();
+    }
   }
 
   @override
@@ -453,7 +528,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final apiKey = _apiKeyController.text.trim();
     setState(() => _isSavingConnection = true);
     try {
-      await verifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
+      await debugVerifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
       await saveBackendUrl(baseUrl);
       await saveBackendApiKey(apiKey);
       await _refreshHomeStatuses();
@@ -657,10 +732,32 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                 physics: const NeverScrollableScrollPhysics(),
                 childAspectRatio: 1.55,
                 children: [
-                  _StatusTile(status: _backendStatus),
-                  _StatusTile(status: _micStatus),
-                  _StatusTile(status: _accessibilityStatus),
-                  _StatusTile(status: _overlayPermissionStatus),
+                  _StatusTile(
+                    key: const ValueKey<String>('status_backend'),
+                    status: _backendStatus,
+                    onTap: () => _handleBackendStatusTap(context),
+                  ),
+                  _StatusTile(
+                    key: const ValueKey<String>('status_mic'),
+                    status: _micStatus,
+                    onTap: () => _handlePermissionStatusTap(context, _micStatus),
+                  ),
+                  _StatusTile(
+                    key: const ValueKey<String>('status_accessibility'),
+                    status: _accessibilityStatus,
+                    onTap: () => _handlePermissionStatusTap(
+                      context,
+                      _accessibilityStatus,
+                    ),
+                  ),
+                  _StatusTile(
+                    key: const ValueKey<String>('status_overlay'),
+                    status: _overlayPermissionStatus,
+                    onTap: () => _handlePermissionStatusTap(
+                      context,
+                      _overlayPermissionStatus,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -1279,42 +1376,104 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _StatusTile extends StatelessWidget {
-  const _StatusTile({required this.status});
+  const _StatusTile({super.key, required this.status, this.onTap});
 
   final _RuntimeStatus status;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: status.active ? const Color(0xFFF2F9FF) : const Color(0xFFF6F3F1),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color:
+                status.active ? const Color(0xFFF2F9FF) : const Color(0xFFF6F3F1),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                status.icon,
+                size: 18,
+                color: status.active ? _accentBlue : _warmMuted,
+              ),
+              const Spacer(),
+              Text(
+                status.title,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: _warmMuted,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      status.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: status.active ? _accentBlue : _warmText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                  if (status.latencyMs != null) ...[
+                    const SizedBox(width: 6),
+                    _LatencyBadge(latencyMs: status.latencyMs!),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+}
+
+class _LatencyBadge extends StatelessWidget {
+  const _LatencyBadge({required this.latencyMs});
+
+  final int latencyMs;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isFast = latencyMs < 100;
+    final Color dotColor = isFast ? const Color(0xFF12B76A) : const Color(0xFFF79009);
+    final Color bgColor = isFast ? const Color(0x1F12B76A) : const Color(0x1FF79009);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            status.icon,
-            size: 18,
-            color: status.active ? _accentBlue : _warmMuted,
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: dotColor,
+              shape: BoxShape.circle,
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 5),
           Text(
-            status.title,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: _warmMuted,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            status.label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: status.active ? _accentBlue : _warmText,
+            '${latencyMs}ms',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: dotColor,
                   fontWeight: FontWeight.w700,
+                  fontSize: 10,
                 ),
           ),
         ],

@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:byvo/config/backend_config.dart';
 import 'package:byvo/main.dart';
 import 'package:byvo/transcription/transcription_result.dart';
 
@@ -46,6 +47,8 @@ void main() {
       buildSignature: 'test',
     );
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    debugVerifyBackendConnection = verifyBackendConnection;
+    debugPlatformIsAndroid = defaultPlatformIsAndroid;
   });
 
   testWidgets('MyApp renders transcription shell', (WidgetTester tester) async {
@@ -300,8 +303,78 @@ void main() {
     expect(find.text('音频测试'), findsOneWidget);
     await tester.drag(find.byType(ListView).first, const Offset(0, -600));
     await tester.pumpAndSettle();
-    expect(find.text('版本'), findsOneWidget);
-    expect(find.text('Commit'), findsOneWidget);
+    expect(find.textContaining('版本 '), findsOneWidget);
+  });
+
+  testWidgets('Backend status card opens settings tab when backend is not configured',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+
+    await tester.pumpWidget(
+      const MaterialApp(home: TranscriptionMvpPage()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('status_backend')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('连接'), findsOneWidget);
+    expect(find.text('保存连接配置'), findsOneWidget);
+  });
+
+  testWidgets('Backend status card shows latency badge when backend is connected',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'backend_url': 'http://127.0.0.1:8000',
+      'backend_api_key': 'demo-key',
+    });
+    debugVerifyBackendConnection = ({
+      required String baseUrl,
+      required String apiKey,
+    }) async {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    };
+
+    await tester.pumpWidget(
+      const MaterialApp(home: TranscriptionMvpPage()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('status_backend')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('ms'), findsOneWidget);
+    debugVerifyBackendConnection = verifyBackendConnection;
+  });
+
+  testWidgets('Accessibility status card opens accessibility settings',
+      (WidgetTester tester) async {
+    const insertTextChannel = MethodChannel('byvo/insert_text');
+    final calls = <String>[];
+    debugPlatformIsAndroid = () => true;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, (MethodCall call) async {
+      calls.add(call.method);
+      if (call.method == 'isAccessibilityServiceEnabled') {
+        return false;
+      }
+      return null;
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(home: TranscriptionMvpPage()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('status_accessibility')));
+    await tester.pumpAndSettle();
+
+    expect(calls.where((method) => method == 'openAccessibilitySettings').length, 1);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, null);
+    debugPlatformIsAndroid = defaultPlatformIsAndroid;
   });
 
   testWidgets('Audio test page hold-to-transcribe uses native vibrate feedback on record start and stop',
