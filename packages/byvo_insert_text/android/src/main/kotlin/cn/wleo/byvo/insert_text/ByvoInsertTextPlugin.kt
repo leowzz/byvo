@@ -1,4 +1,4 @@
-package com.example.byvo.insert_text
+package cn.wleo.byvo.insert_text
 
 import android.content.ComponentName
 import android.content.Intent
@@ -79,7 +79,7 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun isAccessibilityServiceEnabled(ctx: android.content.Context): Boolean {
         val manager = ctx.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
             ?: return false
-        val target = ComponentName(ctx, "com.example.byvo.ByvoAccessibilityService").flattenToString()
+        val target = ComponentName(ctx, "cn.wleo.byvo.ByvoAccessibilityService").flattenToString()
         val enabledServices = Settings.Secure.getString(
             ctx.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
@@ -118,7 +118,7 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     companion object {
         private const val TAG = "ByvoInsertText"
-        const val ACTION_INSERT_TEXT = "com.example.byvo.INSERT_TEXT"
+        const val ACTION_INSERT_TEXT = "cn.wleo.byvo.INSERT_TEXT"
         const val EXTRA_TEXT = "text"
     }
 }

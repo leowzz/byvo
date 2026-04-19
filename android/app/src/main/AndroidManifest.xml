@@ -61,7 +61,7 @@
             android:name=".InsertTextReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.byvo.INSERT_TEXT" />
+                <action android:name="cn.wleo.byvo.INSERT_TEXT" />
             </intent-filter>
         </receiver>
     </application>
