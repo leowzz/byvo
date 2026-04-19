@@ -1383,10 +1383,33 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     }
   }
 
+  Future<bool> _hasNativeMicrophonePermission() async {
+    if (!debugPlatformIsAndroid()) {
+      return true;
+    }
+    try {
+      return await _insertTextChannel.invokeMethod<bool>(
+            'hasMicrophonePermission',
+          ) ??
+          true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// 悬浮球在独立引擎中运行，record 的 hasPermission() 在 overlay 上下文中常误报无权限（主应用已授权即可录）。
   /// 直接尝试 start，失败再视为无权限。
   Future<void> _startHoldRecord() async {
     try {
+      if (!await _hasNativeMicrophonePermission()) {
+        _log('[悬浮球] 录制=无权限');
+        try {
+          await _insertTextChannel.invokeMethod<bool>(
+            'requestMicrophonePermission',
+          );
+        } catch (_) {}
+        return;
+      }
       final Directory tempDir =
           await (widget.tempDirProvider?.call() ?? getTemporaryDirectory());
       final String path =
@@ -1403,6 +1426,11 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       final String msg = e.toString().toLowerCase();
       if (msg.contains('permission') || msg.contains('权限')) {
         _log('[悬浮球] 录制=无权限');
+        if (debugPlatformIsAndroid()) {
+          try {
+            await _insertTextChannel.invokeMethod<bool>('requestMicrophonePermission');
+          } catch (_) {}
+        }
       } else {
         _log('[悬浮球] 录制=启动失败 $e');
       }

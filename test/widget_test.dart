@@ -10,9 +10,10 @@ import 'package:byvo/main.dart';
 import 'package:byvo/transcription/transcription_result.dart';
 
 class _FakeAudioRecorder extends AudioRecorder {
-  _FakeAudioRecorder({required this.stopResult});
+  _FakeAudioRecorder({required this.stopResult, this.startError});
 
   final String? stopResult;
+  final Object? startError;
   int startCallCount = 0;
   int stopCallCount = 0;
 
@@ -22,6 +23,9 @@ class _FakeAudioRecorder extends AudioRecorder {
   @override
   Future<void> start(RecordConfig config, {required String path}) async {
     startCallCount += 1;
+    if (startError != null) {
+      throw startError!;
+    }
   }
 
   @override
@@ -168,6 +172,103 @@ void main() {
 
     expect(calls.where((method) => method == 'openAccessibilitySettings').length, 1);
     expect(calls.where((method) => method == 'insertTextToFocusedField'), isEmpty);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, null);
+    debugPlatformIsAndroid = defaultPlatformIsAndroid;
+  });
+
+  testWidgets(
+      'Overlay ball checks native microphone permission before recording',
+      (WidgetTester tester) async {
+    final recorder = _FakeAudioRecorder(stopResult: '/tmp/fake.wav');
+    const insertTextChannel = MethodChannel('byvo/insert_text');
+    final calls = <String>[];
+    var transcribeCallCount = 0;
+    debugPlatformIsAndroid = () => true;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, (MethodCall call) async {
+      calls.add(call.method);
+      if (call.method == 'hasMicrophonePermission') {
+        return false;
+      }
+      return null;
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OverlayBallPage(
+          recorder: recorder,
+          tempDirProvider: () async => Directory.systemTemp,
+          transcribeAudio: (_) async {
+            transcribeCallCount += 1;
+            return const TranscriptionResult(text: '');
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.byType(GestureDetector)));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(recorder.startCallCount, 0);
+    expect(recorder.stopCallCount, 0);
+    expect(transcribeCallCount, 0);
+    expect(calls.where((method) => method == 'hasMicrophonePermission').length, 1);
+    expect(
+      calls.where((method) => method == 'requestMicrophonePermission').length,
+      1,
+    );
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, null);
+    debugPlatformIsAndroid = defaultPlatformIsAndroid;
+  });
+
+  testWidgets(
+      'Overlay ball requests microphone permission via main activity when recording permission is missing',
+      (WidgetTester tester) async {
+    final recorder = _FakeAudioRecorder(
+      stopResult: null,
+      startError: StateError('permission denied'),
+    );
+    const insertTextChannel = MethodChannel('byvo/insert_text');
+    final calls = <String>[];
+    debugPlatformIsAndroid = () => true;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, (MethodCall call) async {
+      calls.add(call.method);
+      return null;
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OverlayBallPage(
+          recorder: recorder,
+          tempDirProvider: () async => Directory.systemTemp,
+          transcribeAudio: (_) async => const TranscriptionResult(text: ''),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.byType(GestureDetector)));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(recorder.startCallCount, 1);
+    expect(
+      calls.where((method) => method == 'requestMicrophonePermission').length,
+      1,
+    );
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(insertTextChannel, null);

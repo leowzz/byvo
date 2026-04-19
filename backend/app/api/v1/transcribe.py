@@ -18,6 +18,14 @@ from app.services import ark_correction, volcengine
 router = APIRouter()
 
 
+def _audio_header_hex(content: bytes, limit: int = 16) -> str:
+    return content[:limit].hex(" ")
+
+
+def _looks_like_wav(content: bytes) -> bool:
+    return len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WAVE"
+
+
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
     _: None = Depends(require_api_key),
@@ -37,6 +45,18 @@ async def transcribe(
         raise HTTPException(status_code=400, detail="读取音频失败") from e
 
     audio_size = len(content)
+    logger.info(
+        "incoming wav upload size={} header={}",
+        audio_size,
+        _audio_header_hex(content),
+    )
+    if not _looks_like_wav(content):
+        logger.warning(
+            "invalid wav header size={} header={}",
+            audio_size,
+            _audio_header_hex(content),
+        )
+        raise HTTPException(status_code=400, detail="音频文件不是合法 WAV")
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(content)
         tmp_path = Path(tmp.name)
@@ -76,6 +96,9 @@ async def transcribe(
         )
     except (ValueError, FileNotFoundError, RuntimeError) as e:
         logger.warning(f"{e=}")
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        detail = str(e)
+        if e.__class__.__name__ == "LibsndfileError":
+            detail = "音频文件不是合法 WAV"
+        raise HTTPException(status_code=400, detail=detail) from e
     finally:
         tmp_path.unlink(missing_ok=True)
