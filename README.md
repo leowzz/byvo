@@ -82,6 +82,37 @@ make run
 curl http://127.0.0.1:8000/health
 ```
 
+## Docker 部署后端
+
+1. 准备配置文件：
+
+```bash
+cp backend/config/config.yaml.example backend/config/config.yaml
+```
+
+2. 按需修改 `backend/config/config.yaml`，或使用环境变量覆盖：
+
+```bash
+AUTH__API_KEYS='["replace-with-a-long-random-key"]'
+VOLCENGINE__APP_KEY=...
+VOLCENGINE__ACCESS_KEY=...
+VOLCENGINE__RESOURCE_ID=...
+```
+
+3. 启动服务：
+
+```bash
+docker compose up -d --build
+```
+
+4. 验证健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+SQLite 数据默认持久化在 Docker named volume `backend_data`（挂载到容器 `/data`），容器配置文件来自 `backend/config/`。该方案适用于本地开发、Linux x86_64 和 Linux ARM64 环境。
+
 ## 客户端
 
 Flutter 客户端在设置中需要同时配置：
