@@ -133,6 +133,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   bool _effectTranscribe = false;
   int _idleTimeoutSec = 30;
   int _tabIndex = 0;
+  bool _isSavingConnection = false;
 
   /// 主页面测试输入框，用于测悬浮球转写填入。
   final TextEditingController _testInputController = TextEditingController();
@@ -446,15 +447,37 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   }
 
   Future<void> _saveBackendSettings(BuildContext context) async {
-    await saveBackendUrl(_urlController.text.trim());
-    await saveBackendApiKey(_apiKeyController.text.trim());
-    if (_isRealtimeTranscribing) {
-      await _stopRealtimeTranscribe();
-    }
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('设置已保存')),
-      );
+    final baseUrl = _urlController.text.trim();
+    final apiKey = _apiKeyController.text.trim();
+    setState(() => _isSavingConnection = true);
+    try {
+      await verifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
+      await saveBackendUrl(baseUrl);
+      await saveBackendApiKey(apiKey);
+      if (_isRealtimeTranscribing) {
+        await _stopRealtimeTranscribe();
+      }
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          const SnackBar(content: Text('连接测试成功，配置已保存')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingConnection = false);
+      }
     }
   }
 
@@ -660,7 +683,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
             children: [
               _SectionTitle(
                 title: '悬浮球',
-                subtitle: Platform.isAndroid ? '首页直接开关，便于临时测试' : '仅 Android 支持',
+                subtitle: Platform.isAndroid ? null : '仅 Android 支持',
               ),
               const SizedBox(height: 12),
               Row(
@@ -928,8 +951,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                     label: const Text('扫码填充'),
                   ),
                   FilledButton(
-                    onPressed: () => _saveBackendSettings(context),
-                    child: const Text('保存连接配置'),
+                    onPressed: _isSavingConnection
+                        ? null
+                        : () => _saveBackendSettings(context),
+                    child: Text(_isSavingConnection ? '测试中…' : '保存连接配置'),
                   ),
                 ],
               ),
