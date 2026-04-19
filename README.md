@@ -23,6 +23,8 @@ uv sync --extra dev
 复制 `backend/config/config.yaml.example` 为 `backend/config/config.yaml`，并至少配置：
 
 ```yaml
+api_base_url: "http://192.168.1.20:8000"
+
 auth:
   api_keys:
     - "replace-with-a-long-random-key"
@@ -35,6 +37,25 @@ AUTH__API_KEYS='["replace-with-a-long-random-key"]'
 ```
 
 豆包凭证仍可由环境变量 `VOLCENGINE__APP_KEY`、`VOLCENGINE__ACCESS_KEY`、`VOLCENGINE__RESOURCE_ID` 覆盖。
+
+### 启动二维码
+
+若配置了：
+
+- `api_base_url`
+- `auth.api_keys`
+
+后端启动时会在终端打印：
+
+- `API Base URL`
+- `API Key`
+- 一个用于客户端扫码填充的二维码
+
+二维码内容格式为：
+
+`byvo://setup?base_url=...&api_key=...`
+
+若 `api_base_url` 或 API key 缺失，则服务正常启动，但会跳过二维码输出。
 
 ### 启动
 
@@ -67,6 +88,13 @@ Flutter 客户端在设置中需要同时配置：
 
 - 后端 Base URL
 - API Key
+
+在“后端地址配置”弹窗中，可点击“扫码填充”扫描服务端终端二维码，自动回填：
+
+- 后端 Base URL
+- API Key
+
+扫码后仍需点击“保存”才会落盘生效。
 
 客户端通过 HTTP 与 WebSocket 调用后端转写。
 
