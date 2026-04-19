@@ -58,3 +58,5 @@ backend/*.db
 backend/config/config.yaml
 backend/config/volcengine.json
 backend/models/sensevoice/
+
+*.db

@@ -10,5 +10,5 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.example.byvo.insert_text
+        package: cn.wleo.byvo.insert_text
         pluginClass: ByvoInsertTextPlugin

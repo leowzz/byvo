@@ -1,8 +1,9 @@
-group 'com.example.byvo.insert_text'
+group 'cn.wleo.byvo.insert_text'
 version '0.0.1'
 
 buildscript {
     repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
         google()
         mavenCentral()
     }
@@ -14,6 +15,7 @@ buildscript {
 
 rootProject.allprojects {
     repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
         google()
         mavenCentral()
     }
@@ -23,7 +25,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    namespace 'com.example.byvo.insert_text'
+    namespace 'cn.wleo.byvo.insert_text'
     compileSdk 34
 
     compileOptions {

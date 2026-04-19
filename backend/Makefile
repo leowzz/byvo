@@ -1,9 +1,11 @@
 # Backend 常用命令 (uv)
 
-.PHONY: sync run run-dev test clean
+.PHONY: dev sync run run-dev test clean
 
 sync:
 	uv sync --extra dev
+
+dev: run
 
 run:
 	uv run uvicorn app.main:app --host 0.0.0.0 --port 8000

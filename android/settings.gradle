@@ -1,18 +1,23 @@
 pluginManagement {
-    def flutterSdkPath = {
-        def properties = new Properties()
-        file("local.properties").withInputStream { properties.load(it) }
-        def flutterSdkPath = properties.getProperty("flutter.sdk")
-        assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-        return flutterSdkPath
-    }()
+    def localProperties = new Properties()
+    file("local.properties").withInputStream { localProperties.load(it) }
+    def flutterSdkPath = localProperties.getProperty("flutter.sdk")
+    assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+    def flutterStorageBaseUrl = System.getenv("FLUTTER_STORAGE_BASE_URL") ?: "https://storage.googleapis.com"
+    def engineRealm = new File(flutterSdkPath, "bin/internal/engine.realm").text.trim()
+    def flutterEngineRealmPath = engineRealm ? "${engineRealm}/" : ""
+    def flutterEngineRepo = "${flutterStorageBaseUrl}/${flutterEngineRealmPath}download.flutter.io"
 
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
     repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven { url flutterEngineRepo }
     }
 }
 
@@ -23,3 +28,24 @@ plugins {
 }
 
 include ":app"
+
+dependencyResolutionManagement {
+    def localProperties = new Properties()
+    file("local.properties").withInputStream { localProperties.load(it) }
+    def flutterSdkPath = localProperties.getProperty("flutter.sdk")
+    assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+    def flutterStorageBaseUrl = System.getenv("FLUTTER_STORAGE_BASE_URL") ?: "https://storage.googleapis.com"
+    def engineRealm = new File(flutterSdkPath, "bin/internal/engine.realm").text.trim()
+    def flutterEngineRealmPath = engineRealm ? "${engineRealm}/" : ""
+    def flutterEngineRepo = "${flutterStorageBaseUrl}/${flutterEngineRealmPath}download.flutter.io"
+
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
+        google()
+        mavenCentral()
+        maven { url flutterEngineRepo }
+    }
+}

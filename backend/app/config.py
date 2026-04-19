@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(default="sqlite:///./byvo.db")
+    api_base_url: str = Field(default="", description="客户端用于访问后端的 Base URL")
     auth: AuthConfig = Field(default_factory=AuthConfig)
     volcengine: VolcengineConfig = Field(default_factory=VolcengineConfig)
     transcribe_ws_idle_timeout_sec: int = Field(default=5, description="实时转写：无新识别内容超过该秒数则自动关闭连接")

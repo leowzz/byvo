@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -60,7 +61,7 @@
             android:name=".InsertTextReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.byvo.INSERT_TEXT" />
+                <action android:name="cn.wleo.byvo.INSERT_TEXT" />
             </intent-filter>
         </receiver>
     </application>

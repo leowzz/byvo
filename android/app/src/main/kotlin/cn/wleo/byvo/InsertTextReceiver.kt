@@ -1,4 +1,4 @@
-package com.example.byvo
+package cn.wleo.byvo
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -19,7 +19,7 @@ class InsertTextReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "ByvoInsertText"
-        const val ACTION_INSERT_TEXT = "com.example.byvo.INSERT_TEXT"
+        const val ACTION_INSERT_TEXT = "cn.wleo.byvo.INSERT_TEXT"
         const val EXTRA_TEXT = "text"
     }
 }

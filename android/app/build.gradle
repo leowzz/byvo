@@ -6,8 +6,8 @@ plugins {
 }
 
 android {
-    namespace = "com.example.byvo"
-    compileSdk = flutter.compileSdkVersion
+    namespace = "cn.wleo.byvo"
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.byvo"
+        applicationId = "cn.wleo.byvo"
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

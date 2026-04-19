@@ -6,8 +6,8 @@ import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../app_talker.dart';
 import '../config/backend_config.dart';
-import '../debug_log.dart';
 
 /// 实时流式转写：record.startStream + WebSocket 推送 PCM 到后端。
 ///
@@ -91,7 +91,7 @@ class RealtimeStreamEngine {
     _lastAudioSentAt = DateTime.now();
     _lastResponseAt = DateTime.now();
 
-    DebugLog.instance.logApi('实时', 'WS connect $uri');
+    logInfo('[实时] WS connect $uri');
     try {
       _channel = IOWebSocketChannel.connect(
         uri,
@@ -101,7 +101,7 @@ class RealtimeStreamEngine {
     } on WebSocketChannelException catch (e) {
       throw StateError('实时转写认证失败: $e');
     }
-    DebugLog.instance.logApi('实时', 'WS connected');
+    logInfo('[实时] WS connected');
 
     final stream = await _recorder!.startStream(
       const RecordConfig(
@@ -143,20 +143,19 @@ class RealtimeStreamEngine {
         try {
           final json = jsonDecode(message) as Map<String, dynamic>;
           if (json['closed'] == true) {
-            DebugLog.instance.logApi('实时', '<- closed: ${json['reason']}');
+            logInfo('[实时] <- closed: ${json['reason']}');
             _emitConnectionClosed();
             return;
           }
           final text = json['text'] as String?;
           if (text != null) {
-            DebugLog.instance.logApi(
-                '实时', '<- text: ${text.length}字 "${_truncate(text, 40)}"');
+            logDebug('[实时] <- text: ${text.length}字 "${_truncate(text, 40)}"');
             _textController.add(text);
           } else {
-            DebugLog.instance.logApi('实时', '<- $message');
+            logDebug('[实时] <- $message');
           }
         } catch (_) {
-          DebugLog.instance.logApi('实时', '<- raw $message');
+          logDebug('[实时] <- raw $message');
         }
       },
       onDone: () {
@@ -167,11 +166,11 @@ class RealtimeStreamEngine {
         if (closeErrorMessage != null && !_textController.isClosed) {
           _textController.addError(StateError(closeErrorMessage));
         }
-        DebugLog.instance.logApi('实时', 'WS closed');
+        logInfo('[实时] WS closed');
         _emitConnectionClosed();
       },
       onError: (e) {
-        DebugLog.instance.logApi('实时', 'error $e');
+        logError(e, null, '[实时] stream error');
         if (!_textController.isClosed) {
           _textController.addError(e);
         }
@@ -194,7 +193,7 @@ class RealtimeStreamEngine {
 
   /// 停止转写，关闭录音与 WebSocket。
   Future<void> stop() async {
-    DebugLog.instance.logApi('实时', 'stop');
+    logInfo('[实时] stop');
     _stopping = true;
     await _recordSub?.cancel();
     await _recorder?.stop();
