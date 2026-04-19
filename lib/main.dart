@@ -31,10 +31,23 @@ const Color _accentBlue = Color(0xFF0075DE);
 /// 悬浮窗通过 shareData 发送此前缀 + 正文，主应用解析后调用平台填入当前输入框。
 const String _insertTextPrefix = 'INSERT_TEXT:\n';
 final MethodChannel _insertTextChannel = MethodChannel('byvo/insert_text');
+const BackendTranscriptionEngine _sharedBackendEngine =
+    BackendTranscriptionEngine();
 
 void main() {
   logInfo('Talker logging ready');
   runApp(const MyApp());
+}
+
+Future<TranscriptionResult> _transcribeAudioWithCurrentSettings(
+  String audioPath,
+) async {
+  final effect = await loadEffectTranscribe();
+  return _sharedBackendEngine.transcribe(
+    audioPath,
+    effect: effect,
+    useLlm: effect,
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -99,8 +112,6 @@ class TranscriptionMvpPage extends StatefulWidget {
 
 class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     with WidgetsBindingObserver {
-  static const BackendTranscriptionEngine _engine =
-      BackendTranscriptionEngine();
   late final TextEditingController _urlController;
   late final TextEditingController _apiKeyController;
 
@@ -344,11 +355,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     });
     logDebug('[按钮] 转写=开始');
     try {
-      final TranscriptionResult result = await _engine.transcribe(
-        _audioPath!,
-        effect: _effectTranscribe,
-        useLlm: _effectTranscribe,
-      );
+      final TranscriptionResult result =
+          await _transcribeAudioWithCurrentSettings(_audioPath!);
       _safeSetState(() {
         _isTranscribing = false;
         _result = result;
@@ -1203,8 +1211,6 @@ class OverlayBallPage extends StatefulWidget {
 
 class _OverlayBallPageState extends State<OverlayBallPage> {
   final AudioRecorder _recorder = AudioRecorder();
-  static const BackendTranscriptionEngine _engine =
-      BackendTranscriptionEngine();
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
   DateTime? _holdRecordStartTime;
 
@@ -1272,9 +1278,7 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     }
     try {
       _log('[悬浮球] 转写=开始');
-      final effect = await loadEffectTranscribe();
-      final result =
-          await _engine.transcribe(path, effect: effect, useLlm: effect);
+      final result = await _transcribeAudioWithCurrentSettings(path);
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
       FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');
