@@ -41,7 +41,7 @@ dependencies:
   http: ^1.2.0
   permission_handler: ^11.0.0
   flutter_overlay_window: ^0.5.0
-  mobile_scanner: ^6.0.2
+  mobile_scanner: 5.2.3
   byvo_insert_text:
     path: packages/byvo_insert_text
 
