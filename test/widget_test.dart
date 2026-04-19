@@ -129,6 +129,51 @@ void main() {
     debugPlatformIsAndroid = defaultPlatformIsAndroid;
   });
 
+  testWidgets(
+      'Overlay ball prompts accessibility settings when transcription cannot be inserted',
+      (WidgetTester tester) async {
+    final recorder = _FakeAudioRecorder(stopResult: '/tmp/fake.wav');
+    const insertTextChannel = MethodChannel('byvo/insert_text');
+    final calls = <String>[];
+    var now = DateTime(2026, 1, 1, 0, 0, 0);
+    debugPlatformIsAndroid = () => true;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, (MethodCall call) async {
+      calls.add(call.method);
+      if (call.method == 'isAccessibilityServiceEnabled') {
+        return false;
+      }
+      return null;
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OverlayBallPage(
+          recorder: recorder,
+          tempDirProvider: () async => Directory.systemTemp,
+          transcribeAudio: (_) async => const TranscriptionResult(text: 'hello'),
+          nowProvider: () => now,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.byType(GestureDetector)));
+    await tester.pump(const Duration(milliseconds: 700));
+    now = now.add(const Duration(milliseconds: 600));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(calls.where((method) => method == 'openAccessibilitySettings').length, 1);
+    expect(calls.where((method) => method == 'insertTextToFocusedField'), isEmpty);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(insertTextChannel, null);
+    debugPlatformIsAndroid = defaultPlatformIsAndroid;
+  });
+
   testWidgets('Home hold-to-transcribe uses native vibrate feedback on record start and stop',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});

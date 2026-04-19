@@ -1320,6 +1320,7 @@ class OverlayBallPage extends StatefulWidget {
     this.recorder,
     this.tempDirProvider,
     this.transcribeAudio,
+    this.nowProvider,
     this.onRecordStartFeedback,
     this.onRecordStopFeedback,
   });
@@ -1332,6 +1333,9 @@ class OverlayBallPage extends StatefulWidget {
 
   @visibleForTesting
   final Future<TranscriptionResult> Function(String audioPath)? transcribeAudio;
+
+  @visibleForTesting
+  final DateTime Function()? nowProvider;
 
   @visibleForTesting
   final Future<void> Function()? onRecordStartFeedback;
@@ -1353,6 +1357,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     super.initState();
     _recorder = widget.recorder ?? AudioRecorder();
   }
+
+  DateTime _now() => widget.nowProvider?.call() ?? DateTime.now();
 
   void _log(String msg) {
     if (!kDebugMode) return;
@@ -1388,7 +1394,7 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav),
           path: path);
       if (mounted) {
-        setState(() => _holdRecordStartTime = DateTime.now());
+        setState(() => _holdRecordStartTime = _now());
         await (widget.onRecordStartFeedback?.call() ??
             _triggerNativeVibration());
         _log('[悬浮球] 录制=开始');
@@ -1415,7 +1421,7 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       _log('[悬浮球] 松手=无路径');
       return;
     }
-    final Duration duration = DateTime.now().difference(startTime);
+    final Duration duration = _now().difference(startTime);
     if (duration < _holdRecordMinDuration) {
       _log('[悬浮球] 松手=太短 ${duration.inMilliseconds}ms');
       return;
@@ -1428,7 +1434,17 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
       FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');
-      if (Platform.isAndroid && result.text.isNotEmpty) {
+      if (debugPlatformIsAndroid() && result.text.isNotEmpty) {
+        final accessibilityEnabled =
+            await _insertTextChannel.invokeMethod<bool>(
+                  'isAccessibilityServiceEnabled',
+                ) ??
+                false;
+        if (!accessibilityEnabled) {
+          _log('[悬浮球] 无障碍未开启，打开设置');
+          await _insertTextChannel.invokeMethod<void>('openAccessibilitySettings');
+          return;
+        }
         _log('[悬浮球] 请求填入当前输入框');
         try {
           final ok = await _insertTextChannel.invokeMethod<bool>(
