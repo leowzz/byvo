@@ -21,6 +21,12 @@ import 'transcription/transcription_result.dart';
 const String _keyShowFloatingBall = 'show_floating_ball';
 const String _keyOverlayLastX = 'overlay_last_x';
 const String _keyOverlayLastY = 'overlay_last_y';
+const Color _warmCanvas = Color(0xFFF6F5F4);
+const Color _warmSurface = Color(0xFFFFFFFF);
+const Color _warmBorder = Color(0x1A000000);
+const Color _warmText = Color(0xF2000000);
+const Color _warmMuted = Color(0xFF615D59);
+const Color _accentBlue = Color(0xFF0075DE);
 
 /// 悬浮窗通过 shareData 发送此前缀 + 正文，主应用解析后调用平台填入当前输入框。
 const String _insertTextPrefix = 'INSERT_TEXT:\n';
@@ -39,8 +45,45 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'byvo',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        scaffoldBackgroundColor: _warmCanvas,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _accentBlue,
+          brightness: Brightness.light,
+          surface: _warmSurface,
+        ),
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _warmCanvas,
+          foregroundColor: _warmText,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: _warmText,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: _warmSurface,
+          indicatorColor: const Color(0x14213183),
+          surfaceTintColor: Colors.transparent,
+          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>(
+            (states) => TextStyle(
+              fontSize: 12,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+              color: _warmText,
+            ),
+          ),
+        ),
+        cardTheme: const CardThemeData(
+          color: _warmSurface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          margin: EdgeInsets.zero,
+        ),
       ),
       home: const TranscriptionMvpPage(),
     );
@@ -58,6 +101,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     with WidgetsBindingObserver {
   static const BackendTranscriptionEngine _engine =
       BackendTranscriptionEngine();
+  late final TextEditingController _urlController;
+  late final TextEditingController _apiKeyController;
 
   String? _audioPath;
   bool _isTranscribing = false;
@@ -76,6 +121,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   bool _showFloatingBall = false;
   bool _effectTranscribe = false;
   int _idleTimeoutSec = 30;
+  int _tabIndex = 0;
 
   /// 主页面测试输入框，用于测悬浮球转写填入。
   final TextEditingController _testInputController = TextEditingController();
@@ -87,10 +133,13 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   @override
   void initState() {
     super.initState();
+    _urlController = TextEditingController();
+    _apiKeyController = TextEditingController();
     WidgetsBinding.instance.addObserver(this);
     _loadShowFloatingBall();
     _loadEffectTranscribe();
     _loadIdleTimeoutSec();
+    _loadBackendFields();
     _overlayLogSub = FlutterOverlayWindow.overlayListener.listen((dynamic msg) {
       final s = msg?.toString() ?? '';
       if (s.startsWith(_insertTextPrefix)) {
@@ -101,6 +150,14 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
       logDebug(s);
     });
+  }
+
+  Future<void> _loadBackendFields() async {
+    final url = await loadBackendUrl();
+    final apiKey = await loadBackendApiKey();
+    if (!mounted) return;
+    _urlController.text = url;
+    _apiKeyController.text = apiKey;
   }
 
   @override
@@ -182,6 +239,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   void dispose() {
     _overlayLogSub?.cancel();
     _testInputController.dispose();
+    _urlController.dispose();
+    _apiKeyController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -378,13 +437,37 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     logDebug('[按钮] 实时转写=已停止');
   }
 
-  Future<void> _openBackendSettings(BuildContext context) async {
-    final bool? didSave = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => _BackendSettingsDialog(),
-    );
-    if (didSave == true && _isRealtimeTranscribing) {
+  Future<void> _saveBackendSettings(BuildContext context) async {
+    await saveBackendUrl(_urlController.text.trim());
+    await saveBackendApiKey(_apiKeyController.text.trim());
+    if (_isRealtimeTranscribing) {
       await _stopRealtimeTranscribe();
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('设置已保存')),
+      );
+    }
+  }
+
+  Future<void> _scanAndFillSettings(BuildContext context) async {
+    final raw = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => const SetupQrPage(),
+      ),
+    );
+    if (!context.mounted || raw == null) return;
+
+    try {
+      final config = parseByvoSetupUri(raw);
+      setState(() {
+        _urlController.text = config.baseUrl;
+        _apiKeyController.text = config.apiKey;
+      });
+    } on FormatException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message.toString())),
+      );
     }
   }
 
@@ -465,13 +548,13 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   @override
   Widget build(BuildContext context) {
     final bool canTranscribe = _audioPath != null;
+    final pageTitles = <String>['首页', '设置'];
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('byvo · ${_engine.displayName}'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Text(pageTitles[_tabIndex]),
         actions: [
-          if (kDebugMode)
+          if (kDebugMode && _tabIndex == 0)
             IconButton(
               tooltip: '调试日志',
               onPressed: () {
@@ -485,350 +568,609 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
             ),
         ],
       ),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            Container(
-              height: kToolbarHeight + MediaQuery.of(context).padding.top,
-              padding: EdgeInsets.fromLTRB(
-                  16, MediaQuery.of(context).padding.top + 8, 16, 8),
-              decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .inversePrimary
-                      .withValues(alpha: 0.3)),
-              alignment: Alignment.centerLeft,
-              child: const Text('设置',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            ListTile(
-              title: const Text('悬浮球'),
-              trailing: Switch(
-                value: _showFloatingBall,
-                onChanged: (bool v) => _onFloatingBallSwitchChanged(context, v),
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          _buildHomeTab(context, canTranscribe),
+          _buildSettingsTab(context),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (index) => setState(() => _tabIndex = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: '首页',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: '设置',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeTab(BuildContext context, bool canTranscribe) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '临时测试',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: _warmText,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
-            ),
-            ListTile(
-              title: const Text('LLM处理'),
-              trailing: Switch(
-                value: _effectTranscribe,
-                onChanged: (bool v) async {
-                  setState(() => _effectTranscribe = v);
-                  await saveEffectTranscribe(v);
-                },
+              const SizedBox(height: 6),
+              Text(
+                '用于验证后端连接、填入能力和悬浮球状态，保持操作简短直接。',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: _warmMuted,
+                    ),
               ),
-            ),
-            ListTile(
-              title: const Text('无文本断开(秒)'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: _idleTimeoutSec <= 0
-                        ? null
-                        : () async {
-                            final v = (_idleTimeoutSec - 1).clamp(0, 300);
-                            setState(() => _idleTimeoutSec = v);
-                            await saveIdleTimeoutSec(v);
-                          },
+                  _StatusPill(
+                    label:
+                        _urlController.text.trim().isEmpty ? '后端未配置' : '后端已配置',
+                    active: _urlController.text.trim().isNotEmpty,
                   ),
-                  SizedBox(
-                    width: 36,
-                    child:
-                        Text('$_idleTimeoutSec', textAlign: TextAlign.center),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: _idleTimeoutSec >= 300
-                        ? null
-                        : () async {
-                            final v = (_idleTimeoutSec + 1).clamp(0, 300);
-                            setState(() => _idleTimeoutSec = v);
-                            await saveIdleTimeoutSec(v);
-                          },
+                  _StatusPill(
+                    label: _showFloatingBall ? '悬浮球已开启' : '悬浮球已关闭',
+                    active: _showFloatingBall,
                   ),
                 ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          OutlinedButton.icon(
-            onPressed: () => _openBackendSettings(context),
-            icon: const Icon(Icons.settings),
-            label: const Text('后端地址配置'),
-          ),
-          const SizedBox(height: 16),
-          const Text('测试填入（悬浮球转写会填入此处）',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _testInputController,
-            decoration: const InputDecoration(
-              hintText: '点一下获得焦点，再用悬浮球长按录音转写',
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            maxLines: 3,
-            minLines: 1,
-          ),
-          const SizedBox(height: 24),
-          const Text('音频', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(
-            _audioPath != null
-                ? '已选: ${_audioPath!.length > 50 ? '...${_audioPath!.substring(_audioPath!.length - 50)}' : _audioPath}'
-                : '录制后点击转写',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              FilledButton.icon(
-                onPressed: _isTranscribing || _isRealtimeTranscribing
-                    ? null
-                    : (_holdRecordStartTime != null
-                        ? null
-                        : _isRecording
-                            ? () => _stopRecording(context)
-                            : _startRecording),
-                icon: Icon(
-                  _isRealtimeTranscribing
-                      ? Icons.mic
-                      : (_isRecording && _holdRecordStartTime == null
-                          ? Icons.stop
-                          : Icons.mic),
+              _SectionTitle(
+                title: '悬浮球',
+                subtitle: Platform.isAndroid ? '首页直接开关，便于临时测试' : '仅 Android 支持',
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _showFloatingBall ? '当前处于开启状态' : '当前处于关闭状态',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: _warmText,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  Switch(
+                    value: _showFloatingBall,
+                    onChanged: (bool v) =>
+                        _onFloatingBallSwitchChanged(context, v),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(
+                title: '测试填入',
+                subtitle: '点一下输入框获得焦点，再通过悬浮球或录音结果验证填入',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _testInputController,
+                decoration: _fieldDecoration(
+                  '点一下获得焦点，再用悬浮球长按录音转写',
                 ),
-                label: Text(
-                  _isRealtimeTranscribing
-                      ? '录制'
-                      : (_isRecording && _holdRecordStartTime == null
-                          ? '停止录制'
-                          : '录制'),
+                maxLines: 3,
+                minLines: 1,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(
+                title: '音频测试',
+                subtitle: _audioPath != null
+                    ? '已选: ${_audioPath!.length > 42 ? '...${_audioPath!.substring(_audioPath!.length - 42)}' : _audioPath}'
+                    : '录制后可立即测试转写',
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _isTranscribing || _isRealtimeTranscribing
+                        ? null
+                        : (_holdRecordStartTime != null
+                            ? null
+                            : _isRecording
+                                ? () => _stopRecording(context)
+                                : _startRecording),
+                    icon: Icon(
+                      _isRealtimeTranscribing
+                          ? Icons.mic
+                          : (_isRecording && _holdRecordStartTime == null
+                              ? Icons.stop
+                              : Icons.mic),
+                    ),
+                    label: Text(
+                      _isRealtimeTranscribing
+                          ? '录制'
+                          : (_isRecording && _holdRecordStartTime == null
+                              ? '停止录制'
+                              : '录制'),
+                    ),
+                  ),
+                  GestureDetector(
+                    onPanDown: (_) {
+                      if (_isTranscribing ||
+                          _isRealtimeTranscribing ||
+                          _isRecording) {
+                        return;
+                      }
+                      _holdRecordStartTime = DateTime.now();
+                      logDebug('[按钮] 长按录音=按下');
+                      _startRecording();
+                    },
+                    onPanEnd: (_) => _stopHoldAndTranscribe(context),
+                    onPanCancel: () => _stopHoldAndTranscribe(context),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _holdRecordStartTime != null
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                : const Color(0xFFF2F9FF),
+                          ),
+                          child: Icon(
+                            _holdRecordStartTime != null
+                                ? Icons.stop
+                                : Icons.mic_none,
+                            color: _holdRecordStartTime != null
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : _accentBlue,
+                            size: 28,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '长按录音转写',
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: _warmMuted,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _isRealtimeTranscribing
+                        ? _stopRealtimeTranscribe
+                        : (_isTranscribing || _isRecording
+                            ? null
+                            : () => _startRealtimeTranscribe(context)),
+                    icon: _isRealtimeTranscribing
+                        ? const Icon(Icons.stop_circle)
+                        : const Icon(Icons.record_voice_over),
+                    label: Text(
+                      _isRealtimeTranscribing ? '停止实时转写' : '实时转写',
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: (_isTranscribing ||
+                            _isRealtimeTranscribing ||
+                            !canTranscribe)
+                        ? null
+                        : _transcribe,
+                    icon: _isTranscribing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.transcribe),
+                    label: Text(_isTranscribing ? '转写中…' : '转写'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
+          const SizedBox(height: 16),
+          _SectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionTitle(title: '实时转写结果'),
+                const SizedBox(height: 12),
+                if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
+                if (_realtimeConnectionClosed) ...[
+                  if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
+                  Text(
+                    '已关闭',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: _warmMuted),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          _SectionCard(
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Color(0xFFB42318)),
+            ),
+          ),
+        ],
+        if (_result != null) ...[
+          const SizedBox(height: 16),
+          _SectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionTitle(title: '转写结果'),
+                const SizedBox(height: 12),
+                SelectableText(_result!.text),
+                if (_result!.emotion != null || _result!.event != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _warmMuted,
+                        ),
+                  ),
+                ],
+                if (_result!.lang != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '语种: ${_result!.lang}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _warmMuted,
+                        ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSettingsTab(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionTitle(
+                title: '连接',
+                subtitle: '调整后端地址、API Key，或通过二维码快速填充',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _urlController,
+                decoration: _fieldDecoration('http://192.168.x.x:8000'),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _apiKeyController,
+                decoration: _fieldDecoration('输入服务端要求的 X-API-Key'),
+                obscureText: true,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _scanAndFillSettings(context),
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('扫码填充'),
+                  ),
+                  FilledButton(
+                    onPressed: () => _saveBackendSettings(context),
+                    child: const Text('保存连接配置'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionTitle(
+                title: '转写',
+                subtitle: '控制效果处理与无文本自动断开行为',
+              ),
+              const SizedBox(height: 8),
+              _SettingRow(
+                title: 'LLM处理',
+                subtitle: '开启后做去口语化与语义顺滑',
+                trailing: Switch(
+                  value: _effectTranscribe,
+                  onChanged: (bool v) async {
+                    setState(() => _effectTranscribe = v);
+                    await saveEffectTranscribe(v);
+                  },
                 ),
               ),
-              GestureDetector(
-                onPanDown: (_) {
-                  if (_isTranscribing ||
-                      _isRealtimeTranscribing ||
-                      _isRecording) {
-                    return;
-                  }
-                  _holdRecordStartTime = DateTime.now();
-                  logDebug('[按钮] 长按录音=按下');
-                  _startRecording();
-                },
-                onPanEnd: (_) => _stopHoldAndTranscribe(context),
-                onPanCancel: () => _stopHoldAndTranscribe(context),
-                child: Column(
+              const Divider(height: 20, color: _warmBorder),
+              _SettingRow(
+                title: '无文本断开(秒)',
+                subtitle: '实时转写在长时间无结果时自动关闭连接',
+                trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _holdRecordStartTime != null
-                            ? Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest
-                            : Theme.of(context).colorScheme.primaryContainer,
-                      ),
-                      child: Icon(
-                        _holdRecordStartTime != null
-                            ? Icons.stop
-                            : Icons.mic_none,
-                        color: _holdRecordStartTime != null
-                            ? Theme.of(context).colorScheme.onSurfaceVariant
-                            : Theme.of(context).colorScheme.onPrimaryContainer,
-                        size: 28,
+                    IconButton(
+                      onPressed: _idleTimeoutSec <= 0
+                          ? null
+                          : () async {
+                              final v = (_idleTimeoutSec - 1).clamp(0, 300);
+                              setState(() => _idleTimeoutSec = v);
+                              await saveIdleTimeoutSec(v);
+                            },
+                      icon: const Icon(Icons.remove),
+                    ),
+                    SizedBox(
+                      width: 32,
+                      child: Text(
+                        '$_idleTimeoutSec',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: _warmText,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '长按录音转写',
-                      style: Theme.of(context).textTheme.labelSmall,
+                    IconButton(
+                      onPressed: _idleTimeoutSec >= 300
+                          ? null
+                          : () async {
+                              final v = (_idleTimeoutSec + 1).clamp(0, 300);
+                              setState(() => _idleTimeoutSec = v);
+                              await saveIdleTimeoutSec(v);
+                            },
+                      icon: const Icon(Icons.add),
                     ),
                   ],
                 ),
               ),
-              FilledButton.icon(
-                onPressed: _isRealtimeTranscribing
-                    ? _stopRealtimeTranscribe
-                    : (_isTranscribing || _isRecording
-                        ? null
-                        : () => _startRealtimeTranscribe(context)),
-                icon: _isRealtimeTranscribing
-                    ? const Icon(Icons.stop_circle)
-                    : const Icon(Icons.record_voice_over),
-                label: Text(_isRealtimeTranscribing ? '停止实时转写' : '实时转写'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(
+                title: '悬浮球',
+                subtitle: '主要开关放在首页，这里保留说明，便于理解当前用途',
               ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed:
-                (_isTranscribing || _isRealtimeTranscribing || !canTranscribe)
-                    ? null
-                    : _transcribe,
-            icon: _isTranscribing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.transcribe),
-            label: Text(_isTranscribing ? '转写中…' : '转写'),
-          ),
-          if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
-            const SizedBox(height: 24),
-            const Text('实时转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
-            if (_realtimeConnectionClosed) ...[
-              if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
-              Text('已关闭',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: Theme.of(context).colorScheme.outline)),
-            ],
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            Text(_error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ],
-          if (_result != null) ...[
-            const SizedBox(height: 24),
-            const Text('转写结果', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            SelectableText(_result!.text),
-            if (_result!.emotion != null || _result!.event != null) ...[
-              const SizedBox(height: 12),
-              const Text('情感 / 环境',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
+              SizedBox(height: 8),
               Text(
-                '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
-                style: Theme.of(context).textTheme.bodySmall,
+                '首页用于临时测试和快速控制悬浮球；设置页集中放置连接与转写参数。',
+                style: TextStyle(color: _warmMuted, height: 1.5),
               ),
             ],
-            if (_result!.lang != null) ...[
-              const SizedBox(height: 4),
-              Text('语种: ${_result!.lang}',
-                  style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ],
+          ),
+        ),
+        if (kDebugMode) ...[
+          const SizedBox(height: 16),
+          _SectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionTitle(
+                  title: '调试',
+                  subtitle: '开发环境下可查看 Talker 日志',
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('打开调试日志'),
+                  subtitle: const Text('查看网络与客户端交互日志'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => TalkerScreen(talker: appTalker),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
         ],
+      ],
+    );
+  }
+
+  InputDecoration _fieldDecoration(String hintText) {
+    return InputDecoration(
+      hintText: hintText,
+      filled: true,
+      fillColor: _warmSurface,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _warmBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _accentBlue),
       ),
     );
   }
 }
 
-class _BackendSettingsDialog extends StatefulWidget {
-  const _BackendSettingsDialog();
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({required this.child});
 
-  @override
-  State<_BackendSettingsDialog> createState() => _BackendSettingsDialogState();
-}
-
-class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
-  late final TextEditingController _urlController;
-  late final TextEditingController _apiKeyController;
-
-  @override
-  void initState() {
-    super.initState();
-    _urlController = TextEditingController();
-    _apiKeyController = TextEditingController();
-    loadBackendUrl().then((String url) {
-      if (mounted) _urlController.text = url;
-    });
-    loadBackendApiKey().then((String key) {
-      if (mounted) _apiKeyController.text = key;
-    });
-  }
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    _apiKeyController.dispose();
-    super.dispose();
-  }
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('后端地址配置'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () async {
-                final raw = await Navigator.of(context).push<String>(
-                  MaterialPageRoute<String>(
-                    builder: (_) => const SetupQrPage(),
-                  ),
-                );
-                if (!context.mounted || raw == null) return;
+    return Container(
+      decoration: BoxDecoration(
+        color: _warmSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _warmBorder),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: child,
+    );
+  }
+}
 
-                try {
-                  final config = parseByvoSetupUri(raw);
-                  _urlController.text = config.baseUrl;
-                  _apiKeyController.text = config.apiKey;
-                } on FormatException catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(e.message.toString())),
-                  );
-                }
-              },
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('扫码填充'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _urlController,
-              decoration: const InputDecoration(
-                labelText: '后端 Base URL',
-                hintText: 'http://192.168.177.20:8000 (Android 模拟器)',
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: _warmText,
+                fontWeight: FontWeight.w700,
               ),
-              keyboardType: TextInputType.url,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _apiKeyController,
-              decoration: const InputDecoration(
-                labelText: 'API Key',
-                hintText: '输入服务端要求的 X-API-Key',
-              ),
-              obscureText: true,
-            ),
-          ],
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            subtitle!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: _warmMuted,
+                  height: 1.5,
+                ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.active});
+
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: active ? const Color(0xFFF2F9FF) : const Color(0xFFF1EFED),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: active ? _accentBlue : _warmMuted,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+    );
+  }
+}
+
+class _SettingRow extends StatelessWidget {
+  const _SettingRow({
+    required this.title,
+    this.subtitle,
+    required this.trailing,
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: _warmText,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  subtitle!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _warmMuted,
+                        height: 1.45,
+                      ),
+                ),
+              ],
+            ],
+          ),
         ),
-        FilledButton(
-          onPressed: () async {
-            await saveBackendUrl(_urlController.text.trim());
-            await saveBackendApiKey(_apiKeyController.text.trim());
-            if (context.mounted) Navigator.of(context).pop(true);
-          },
-          child: const Text('保存'),
-        ),
+        const SizedBox(width: 12),
+        trailing,
       ],
     );
   }
