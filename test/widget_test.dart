@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,12 +37,23 @@ class _FakeAudioRecorder extends AudioRecorder {
 }
 
 void main() {
+  setUp(() {
+    PackageInfo.setMockInitialValues(
+      appName: 'byvo',
+      packageName: 'cn.wleo.byvo',
+      version: '1.2.3',
+      buildNumber: '45',
+      buildSignature: 'test',
+    );
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets('MyApp renders transcription shell', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('byvo · 豆包'), findsOneWidget);
-    expect(find.text('转写'), findsOneWidget);
+    expect(find.text('首页'), findsWidgets);
+    expect(find.text('状态'), findsOneWidget);
   });
 
   testWidgets('Overlay ball has no container shadow', (WidgetTester tester) async {
@@ -275,9 +287,25 @@ void main() {
     debugPlatformIsAndroid = defaultPlatformIsAndroid;
   });
 
-  testWidgets('Home hold-to-transcribe uses native vibrate feedback on record start and stop',
+  testWidgets('Settings tab exposes audio test entry and about info',
       (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await tester.pumpWidget(
+      const MaterialApp(home: TranscriptionMvpPage()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('音频测试'), findsOneWidget);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(find.text('版本'), findsOneWidget);
+    expect(find.text('Commit'), findsOneWidget);
+  });
+
+  testWidgets('Audio test page hold-to-transcribe uses native vibrate feedback on record start and stop',
+      (WidgetTester tester) async {
     final recorder = _FakeAudioRecorder(stopResult: null);
     const insertTextChannel = MethodChannel('byvo/insert_text');
     final calls = <String>[];
@@ -294,17 +322,13 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: TranscriptionMvpPage(
+        home: AudioTestPage(
           recorder: recorder,
           tempDirProvider: () async => Directory.systemTemp,
           transcribeAudio: (_) async => const TranscriptionResult(text: ''),
         ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    expect(find.byType(TranscriptionMvpPage), findsOneWidget);
-    await tester.drag(find.byType(ListView).first, const Offset(0, -800));
     await tester.pumpAndSettle();
 
     expect(find.byKey(homeHoldToTranscribeKey), findsOneWidget);

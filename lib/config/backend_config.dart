@@ -42,7 +42,7 @@ const String _keyEffectTranscribe = 'effect_transcribe';
 /// 是否开启效果转写（去口语化/语义顺滑）。
 Future<bool> loadEffectTranscribe() async {
   final prefs = await _getFreshPrefs();
-  return prefs.getBool(_keyEffectTranscribe) ?? false;
+  return prefs.getBool(_keyEffectTranscribe) ?? true;
 }
 
 /// 保存效果转写开关。

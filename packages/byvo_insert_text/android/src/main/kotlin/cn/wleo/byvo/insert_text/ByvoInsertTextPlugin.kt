@@ -98,7 +98,7 @@ class ByvoInsertTextPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     ctx.startActivity(intent)
-                }, 1200)
+                }, 300)
                 result.success(true)
             }
             else -> result.notImplemented()

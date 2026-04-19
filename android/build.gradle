@@ -1,20 +1,33 @@
 allprojects {
     repositories {
         maven { url "https://maven.aliyun.com/repository/google" }
-        google()
-        mavenCentral()
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
     }
 }
 
 // 强制所有子项目（含 record_android）使用与主工程一致的 AGP，避免解析 8.12.3 失败
 subprojects { subproject ->
     subproject.buildscript {
+        repositories.clear()
+        repositories {
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/central" }
+            maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
+        }
         configurations.classpath.resolutionStrategy.eachDependency { details ->
             if (details.requested.group == "com.android.tools.build" && details.requested.name == "gradle") {
                 details.useVersion("8.1.0")
                 details.because("Force AGP 8.1.0 for plugin compatibility")
             }
         }
+    }
+
+    subproject.repositories.clear()
+    subproject.repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://maven.aliyun.com/repository/central" }
+        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
     }
 }
 

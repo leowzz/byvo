@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talker_flutter/talker_flutter.dart';
@@ -15,7 +16,6 @@ import 'config/backend_config.dart';
 import 'scan/setup_qr_page.dart';
 import 'scan/setup_qr_parser.dart';
 import 'transcription/backend_engine.dart';
-import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_result.dart';
 
 const String _keyShowFloatingBall = 'show_floating_ball';
@@ -33,6 +33,8 @@ const String _insertTextPrefix = 'INSERT_TEXT:\n';
 final MethodChannel _insertTextChannel = MethodChannel('byvo/insert_text');
 const BackendTranscriptionEngine _sharedBackendEngine =
     BackendTranscriptionEngine();
+final Stream<dynamic> _overlayEvents =
+    FlutterOverlayWindow.overlayListener.asBroadcastStream();
 @visibleForTesting
 const ValueKey<String> homeHoldToTranscribeKey =
     ValueKey<String>('home_hold_to_transcribe');
@@ -40,6 +42,20 @@ bool defaultPlatformIsAndroid() => Platform.isAndroid;
 
 @visibleForTesting
 bool Function() debugPlatformIsAndroid = defaultPlatformIsAndroid;
+
+class _RuntimeStatus {
+  const _RuntimeStatus({
+    required this.title,
+    required this.label,
+    required this.active,
+    required this.icon,
+  });
+
+  final String title;
+  final String label;
+  final bool active;
+  final IconData icon;
+}
 
 void main() {
   logInfo('Talker logging ready');
@@ -159,33 +175,42 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   late final TextEditingController _urlController;
   late final TextEditingController _apiKeyController;
 
-  String? _audioPath;
-  bool _isTranscribing = false;
-  TranscriptionResult? _result;
-  String? _error;
-  bool _isRecording = false;
-  bool _isRealtimeTranscribing = false;
-  bool _realtimeConnectionClosed = false;
-  String _realtimeText = '';
   late final AudioRecorder _recorder;
-  RealtimeStreamEngine? _realtimeStreamEngine;
-  StreamSubscription<String>? _realtimeTextSub;
-  StreamSubscription<void>? _realtimeClosedSub;
   StreamSubscription<dynamic>? _overlayLogSub;
 
   bool _showFloatingBall = false;
   bool _pendingEnableFloatingBallAfterAccessibility = false;
-  bool _effectTranscribe = false;
+  bool _effectTranscribe = true;
   int _idleTimeoutSec = 30;
   int _tabIndex = 0;
   bool _isSavingConnection = false;
-
-  /// 主页面测试输入框，用于测悬浮球转写填入。
-  final TextEditingController _testInputController = TextEditingController();
-
-  /// 长按录音按钮按下时间，用于松手后判断是否达到最短时长再转写。
-  DateTime? _holdRecordStartTime;
-  static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
+  String _appVersion = '...';
+  DateTime? _versionTapAnchor;
+  int _versionTapCount = 0;
+  _RuntimeStatus _backendStatus = const _RuntimeStatus(
+    title: '后端服务',
+    label: '检测中',
+    active: false,
+    icon: Icons.cloud_outlined,
+  );
+  _RuntimeStatus _micStatus = const _RuntimeStatus(
+    title: '录音权限',
+    label: '检测中',
+    active: false,
+    icon: Icons.mic_none_rounded,
+  );
+  _RuntimeStatus _accessibilityStatus = const _RuntimeStatus(
+    title: '无障碍',
+    label: '检测中',
+    active: false,
+    icon: Icons.accessibility_new_rounded,
+  );
+  _RuntimeStatus _overlayPermissionStatus = const _RuntimeStatus(
+    title: '悬浮球权限',
+    label: '检测中',
+    active: false,
+    icon: Icons.bubble_chart_outlined,
+  );
 
   @override
   void initState() {
@@ -197,8 +222,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     _loadShowFloatingBall();
     _loadEffectTranscribe();
     _loadIdleTimeoutSec();
+    _loadAppInfo();
     _loadBackendFields();
-    _overlayLogSub = FlutterOverlayWindow.overlayListener.listen((dynamic msg) {
+    _overlayLogSub = _overlayEvents.listen((dynamic msg) {
       final s = msg?.toString() ?? '';
       if (s.startsWith(_insertTextPrefix)) {
         final text = s.substring(_insertTextPrefix.length);
@@ -214,8 +240,119 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final url = await loadBackendUrl();
     final apiKey = await loadBackendApiKey();
     if (!mounted) return;
-    _urlController.text = url;
-    _apiKeyController.text = apiKey;
+    setState(() {
+      _urlController.text = url;
+      _apiKeyController.text = apiKey;
+    });
+    await _refreshHomeStatuses();
+  }
+
+  Future<void> _loadAppInfo() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    setState(() {
+      _appVersion = '${packageInfo.version} (${packageInfo.buildNumber})';
+    });
+  }
+
+  Future<void> _refreshHomeStatuses() async {
+    final String baseUrl = _urlController.text.trim();
+    final String apiKey = _apiKeyController.text.trim();
+
+    _RuntimeStatus backendStatus;
+    if (baseUrl.isEmpty) {
+      backendStatus = const _RuntimeStatus(
+        title: '后端服务',
+        label: '未配置',
+        active: false,
+        icon: Icons.cloud_off_outlined,
+      );
+    } else if (apiKey.isEmpty) {
+      backendStatus = const _RuntimeStatus(
+        title: '后端服务',
+        label: '缺少 Key',
+        active: false,
+        icon: Icons.key_off_outlined,
+      );
+    } else {
+      try {
+        await verifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
+        backendStatus = const _RuntimeStatus(
+          title: '后端服务',
+          label: '已连接',
+          active: true,
+          icon: Icons.cloud_done_outlined,
+        );
+      } catch (e) {
+        backendStatus = _RuntimeStatus(
+          title: '后端服务',
+          label: e.toString().replaceFirst('Bad state: ', ''),
+          active: false,
+          icon: Icons.cloud_off_outlined,
+        );
+      }
+    }
+
+    final bool micGranted = await _recorder.hasPermission(request: false);
+    final bool isAndroid = debugPlatformIsAndroid();
+    final bool accessibilityEnabled =
+        isAndroid ? await _isAccessibilityServiceEnabled() : false;
+    bool overlayGranted = false;
+    if (isAndroid) {
+      try {
+        overlayGranted = await FlutterOverlayWindow.isPermissionGranted();
+      } catch (_) {
+        overlayGranted = false;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _backendStatus = backendStatus;
+      _micStatus = _RuntimeStatus(
+        title: '录音权限',
+        label: micGranted ? '已允许' : '未允许',
+        active: micGranted,
+        icon: micGranted ? Icons.mic_rounded : Icons.mic_off_rounded,
+      );
+      _accessibilityStatus = _RuntimeStatus(
+        title: '无障碍',
+        label: isAndroid
+            ? (accessibilityEnabled ? '已开启' : '未开启')
+            : '仅 Android',
+        active: isAndroid ? accessibilityEnabled : false,
+        icon: Icons.accessibility_new_rounded,
+      );
+      _overlayPermissionStatus = _RuntimeStatus(
+        title: '悬浮球权限',
+        label: isAndroid ? (overlayGranted ? '已允许' : '未允许') : '仅 Android',
+        active: isAndroid ? overlayGranted : false,
+        icon: overlayGranted
+            ? Icons.bubble_chart_rounded
+            : Icons.bubble_chart_outlined,
+      );
+    });
+  }
+
+  void _handleVersionTap() {
+    final now = DateTime.now();
+    if (_versionTapAnchor == null ||
+        now.difference(_versionTapAnchor!) > const Duration(seconds: 2)) {
+      _versionTapAnchor = now;
+      _versionTapCount = 1;
+    } else {
+      _versionTapCount += 1;
+      _versionTapAnchor = now;
+    }
+    if (_versionTapCount < 5 || !kDebugMode || !mounted) {
+      return;
+    }
+    _versionTapCount = 0;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TalkerScreen(talker: appTalker),
+      ),
+    );
   }
 
   @override
@@ -226,6 +363,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     Future<void>.microtask(() async {
       try {
         if (!mounted) return;
+        await _refreshHomeStatuses();
         if (_pendingEnableFloatingBallAfterAccessibility) {
           _pendingEnableFloatingBallAfterAccessibility = false;
           final bool accessibilityEnabled =
@@ -265,6 +403,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         }
       } catch (_) {}
     }
+    await _refreshHomeStatuses();
   }
 
   /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
@@ -303,203 +442,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   @override
   void dispose() {
     _overlayLogSub?.cancel();
-    _testInputController.dispose();
     _urlController.dispose();
     _apiKeyController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  void _safeSetState(VoidCallback fn) {
-    if (mounted) setState(fn);
-  }
-
-  /// 弹窗显示错误信息（后端连不上等）。
-  void _showErrorDialog(BuildContext context, String title, String message) {
-    if (!context.mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: Text(title),
-        content: SelectableText(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 检查麦克风权限，未授权时设置 _error 并返回 false。
-  Future<bool> _requireMicPermission() async {
-    final bool ok = await _recorder.hasPermission();
-    if (!ok) _safeSetState(() => _error = '需要麦克风权限');
-    return ok;
-  }
-
-  Future<void> _startRecording() async {
-    if (!await _requireMicPermission()) return;
-    final Directory tempDir =
-        await (widget.tempDirProvider?.call() ?? getTemporaryDirectory());
-    final String path =
-        '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
-    await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.wav),
-      path: path,
-    );
-    _safeSetState(() => _isRecording = true);
-    logDebug('[按钮] 录制=开始');
-  }
-
-  Future<void> _stopRecording(BuildContext context) async {
-    final String? path = await _recorder.stop();
-    _safeSetState(() {
-      _isRecording = false;
-      if (path != null) {
-        _audioPath = path;
-        _error = null;
-      }
-    });
-    logDebug('[按钮] 录制=停止 path=${path != null}');
-    if (path != null && mounted) {
-      await _transcribe();
-    }
-  }
-
-  /// 长按录音松手：停止录音，若时长达到 [_holdRecordMinDuration] 则上传并调用转写接口。
-  Future<void> _stopHoldAndTranscribe(BuildContext? context) async {
-    if (!_isRecording || _holdRecordStartTime == null) return;
-    final DateTime startTime = _holdRecordStartTime!;
-    _holdRecordStartTime = null;
-    final String? path = await _recorder.stop();
-    _safeSetState(() => _isRecording = false);
-    await (widget.onRecordStopFeedback?.call() ?? _triggerNativeVibration());
-    logDebug('[按钮] 长按录音=松手 path=${path != null}');
-    if (path == null) return;
-    final Duration duration = DateTime.now().difference(startTime);
-    if (duration < _holdRecordMinDuration) {
-      logDebug('[按钮] 长按录音=太短 ${duration.inMilliseconds}ms');
-      _safeSetState(() =>
-          _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms');
-      return;
-    }
-    _safeSetState(() {
-      _audioPath = path;
-      _error = null;
-    });
-    if (mounted) {
-      await _transcribe();
-    }
-  }
-
-  Future<void> _transcribe() async {
-    if (_audioPath == null) {
-      setState(() => _error = '请先选择或录制音频');
-      return;
-    }
-    final File audioFile = File(_audioPath!);
-    if (!audioFile.existsSync()) {
-      setState(() => _error = '音频文件不存在');
-      return;
-    }
-    setState(() {
-      _isTranscribing = true;
-      _error = null;
-      _result = null;
-    });
-    logDebug('[按钮] 转写=开始');
-    try {
-      final TranscriptionResult result =
-          await (widget.transcribeAudio?.call(_audioPath!) ??
-              _transcribeAudioWithCurrentSettings(_audioPath!));
-      _safeSetState(() {
-        _isTranscribing = false;
-        _result = result;
-      });
-      logDebug('[按钮] 转写=完成');
-    } catch (e, st) {
-      logError(e, st, 'Transcribe error');
-      _safeSetState(() {
-        _isTranscribing = false;
-        _error = e.toString();
-      });
-      logDebug('[按钮] 转写=失败');
-      if (mounted) {
-        _showErrorDialog(context, '转写失败', e.toString());
-      }
-    }
-  }
-
-  /// 豆包流式转写：WebSocket 边录边出字。
-  Future<void> _startRealtimeTranscribe(BuildContext context) async {
-    if (!await _requireMicPermission()) return;
-    setState(() {
-      _isRealtimeTranscribing = true;
-      _realtimeConnectionClosed = false;
-      _realtimeText = '';
-      _error = null;
-    });
-    logDebug('[按钮] 实时转写=开始');
-    final engine = RealtimeStreamEngine();
-    _realtimeStreamEngine = engine;
-    try {
-      await engine.start(
-        effect: _effectTranscribe,
-        useLlm: _effectTranscribe,
-        idleTimeoutSec: _idleTimeoutSec,
-      );
-      if (!mounted || !_isRealtimeTranscribing) return;
-      _safeSetState(() => _isRecording = true);
-      logDebug('[按钮] 实时转写=已连接(录制中)');
-      _realtimeTextSub = engine.textStream.listen((String text) {
-        if (!mounted || !_isRealtimeTranscribing) return;
-        _safeSetState(() => _realtimeText = text);
-      }, onError: (Object e) {
-        logError(e, null, 'Realtime stream error');
-        _safeSetState(() => _error = e.toString());
-      });
-      _realtimeClosedSub = engine.connectionClosedStream.listen((_) {
-        if (!mounted) return;
-        _realtimeTextSub?.cancel();
-        _realtimeTextSub = null;
-        _realtimeStreamEngine?.stop();
-        _realtimeStreamEngine = null;
-        _safeSetState(() {
-          _isRealtimeTranscribing = false;
-          _isRecording = false;
-          _realtimeConnectionClosed = true;
-        });
-        logDebug('[按钮] 实时转写=连接已关闭');
-      });
-    } catch (e, st) {
-      logError(e, st, 'Realtime stream start error');
-      _safeSetState(() => _error = e.toString());
-      setState(() {
-        _isRealtimeTranscribing = false;
-        _isRecording = false;
-      });
-      logDebug('[按钮] 实时转写=启动失败');
-      if (context.mounted) {
-        _showErrorDialog(context, '实时转写连接失败', e.toString());
-      }
-    }
-  }
-
-  Future<void> _stopRealtimeTranscribe() async {
-    await _realtimeClosedSub?.cancel();
-    _realtimeClosedSub = null;
-    await _realtimeTextSub?.cancel();
-    await _realtimeStreamEngine?.stop();
-    _realtimeStreamEngine = null;
-    _realtimeTextSub = null;
-    _safeSetState(() {
-      _isRealtimeTranscribing = false;
-      _isRecording = false;
-      _realtimeConnectionClosed = true;
-    });
-    logDebug('[按钮] 实时转写=已停止');
   }
 
   Future<void> _saveBackendSettings(BuildContext context) async {
@@ -510,9 +456,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       await verifyBackendConnection(baseUrl: baseUrl, apiKey: apiKey);
       await saveBackendUrl(baseUrl);
       await saveBackendApiKey(apiKey);
-      if (_isRealtimeTranscribing) {
-        await _stopRealtimeTranscribe();
-      }
+      await _refreshHomeStatuses();
       if (context.mounted) {
         final messenger = ScaffoldMessenger.of(context);
         messenger.clearSnackBars();
@@ -547,11 +491,14 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
 
     try {
       final config = parseByvoSetupUri(raw);
+      if (!mounted || !context.mounted) return;
       setState(() {
         _urlController.text = config.baseUrl;
         _apiKeyController.text = config.apiKey;
       });
+      await _saveBackendSettings(context);
     } on FormatException catch (e) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message.toString())),
       );
@@ -634,6 +581,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
       if (!mounted || !context.mounted) return;
       await _enableFloatingBall(context);
+      await _refreshHomeStatuses();
       return;
     }
     _pendingEnableFloatingBallAfterAccessibility = false;
@@ -651,35 +599,21 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     try {
       await FlutterOverlayWindow.closeOverlay();
     } catch (_) {}
+    await _refreshHomeStatuses();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool canTranscribe = _audioPath != null;
     final pageTitles = <String>['首页', '设置'];
 
     return Scaffold(
       appBar: AppBar(
         title: Text(pageTitles[_tabIndex]),
-        actions: [
-          if (kDebugMode && _tabIndex == 0)
-            IconButton(
-              tooltip: '调试日志',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => TalkerScreen(talker: appTalker),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.bug_report_outlined),
-            ),
-        ],
       ),
       body: IndexedStack(
         index: _tabIndex,
         children: [
-          _buildHomeTab(context, canTranscribe),
+          _buildHomeTab(context),
           _buildSettingsTab(context),
         ],
       ),
@@ -702,7 +636,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     );
   }
 
-  Widget _buildHomeTab(BuildContext context, bool canTranscribe) {
+  Widget _buildHomeTab(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
@@ -710,34 +644,23 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '临时测试',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: _warmText,
-                      fontWeight: FontWeight.w700,
-                    ),
+              const _SectionTitle(
+                title: '状态',
+                subtitle: '快速查看服务与系统权限是否就绪',
               ),
-              const SizedBox(height: 6),
-              Text(
-                '用于验证后端连接、填入能力和悬浮球状态，保持操作简短直接。',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: _warmMuted,
-                    ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              const SizedBox(height: 14),
+              GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 2,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                physics: const NeverScrollableScrollPhysics(),
+                childAspectRatio: 1.55,
                 children: [
-                  _StatusPill(
-                    label:
-                        _urlController.text.trim().isEmpty ? '后端未配置' : '后端已配置',
-                    active: _urlController.text.trim().isNotEmpty,
-                  ),
-                  _StatusPill(
-                    label: _showFloatingBall ? '悬浮球已开启' : '悬浮球已关闭',
-                    active: _showFloatingBall,
-                  ),
+                  _StatusTile(status: _backendStatus),
+                  _StatusTile(status: _micStatus),
+                  _StatusTile(status: _accessibilityStatus),
+                  _StatusTile(status: _overlayPermissionStatus),
                 ],
               ),
             ],
@@ -746,244 +669,86 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         const SizedBox(height: 16),
         _SectionCard(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               _SectionTitle(
                 title: '悬浮球',
-                subtitle: Platform.isAndroid ? null : '仅 Android 支持',
+                subtitle: Platform.isAndroid ? '长按悬浮球即可开始录音转写' : '仅 Android 支持',
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _showFloatingBall ? '当前处于开启状态' : '当前处于关闭状态',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: _warmText,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => _onFloatingBallSwitchChanged(
+                    context,
+                    !_showFloatingBall,
                   ),
-                  Switch(
-                    value: _showFloatingBall,
-                    onChanged: (bool v) =>
-                        _onFloatingBallSwitchChanged(context, v),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _SectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle(
-                title: '测试填入',
-                subtitle: '点一下输入框获得焦点，再通过悬浮球或录音结果验证填入',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _testInputController,
-                decoration: _fieldDecoration(
-                  '点一下获得焦点，再用悬浮球长按录音转写',
-                ),
-                maxLines: 3,
-                minLines: 1,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _SectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionTitle(
-                title: '音频测试',
-                subtitle: _audioPath != null
-                    ? '已选: ${_audioPath!.length > 42 ? '...${_audioPath!.substring(_audioPath!.length - 42)}' : _audioPath}'
-                    : '录制后可立即测试转写',
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton.icon(
-                    onPressed: _isTranscribing || _isRealtimeTranscribing
-                        ? null
-                        : (_holdRecordStartTime != null
-                            ? null
-                            : _isRecording
-                                ? () => _stopRecording(context)
-                                : _startRecording),
-                    icon: Icon(
-                      _isRealtimeTranscribing
-                          ? Icons.mic
-                          : (_isRecording && _holdRecordStartTime == null
-                              ? Icons.stop
-                              : Icons.mic),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FBFE),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0x220075DE)),
                     ),
-                    label: Text(
-                      _isRealtimeTranscribing
-                          ? '录制'
-                          : (_isRecording && _holdRecordStartTime == null
-                              ? '停止录制'
-                              : '录制'),
-                    ),
-                  ),
-                  GestureDetector(
-                    key: homeHoldToTranscribeKey,
-                    onPanDown: (_) {
-                      if (_isTranscribing ||
-                          _isRealtimeTranscribing ||
-                          _isRecording) {
-                        return;
-                      }
-                      _holdRecordStartTime = DateTime.now();
-                      logDebug('[按钮] 长按录音=按下');
-                      unawaited(
-                        widget.onRecordStartFeedback?.call() ??
-                            _triggerNativeVibration(),
-                      );
-                      _startRecording();
-                    },
-                    onPanEnd: (_) => _stopHoldAndTranscribe(context),
-                    onPanCancel: () => _stopHoldAndTranscribe(context),
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
                         AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: 56,
-                          height: 56,
+                          duration: const Duration(milliseconds: 180),
+                          width: 74,
+                          height: 74,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: _holdRecordStartTime != null
-                                ? Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest
-                                : const Color(0xFFF2F9FF),
+                            color: _showFloatingBall
+                                ? const Color(0xFFEAF4FF)
+                                : const Color(0xFFF1EFED),
                           ),
                           child: Icon(
-                            _holdRecordStartTime != null
-                                ? Icons.stop
-                                : Icons.mic_none,
-                            color: _holdRecordStartTime != null
-                                ? Theme.of(context).colorScheme.onSurfaceVariant
-                                : _accentBlue,
-                            size: 28,
+                            _showFloatingBall
+                                ? Icons.mic_none
+                                : Icons.power_settings_new,
+                            size: 34,
+                            color: _showFloatingBall
+                                ? _accentBlue
+                                : _warmMuted,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 14),
                         Text(
-                          '长按录音转写',
+                          _showFloatingBall ? '悬浮球已开启' : '悬浮球已关闭',
                           style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: _warmMuted,
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: _warmText,
+                                    fontWeight: FontWeight.w700,
                                   ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _showFloatingBall
+                              ? '可以切到其他应用中使用'
+                              : '开启后可在任意应用中快速发起转写',
+                          textAlign: TextAlign.center,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: _warmMuted,
+                                    height: 1.5,
+                                  ),
+                        ),
+                        const SizedBox(height: 14),
+                        Switch(
+                          value: _showFloatingBall,
+                          onChanged: (bool v) =>
+                              _onFloatingBallSwitchChanged(context, v),
                         ),
                       ],
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: _isRealtimeTranscribing
-                        ? _stopRealtimeTranscribe
-                        : (_isTranscribing || _isRecording
-                            ? null
-                            : () => _startRealtimeTranscribe(context)),
-                    icon: _isRealtimeTranscribing
-                        ? const Icon(Icons.stop_circle)
-                        : const Icon(Icons.record_voice_over),
-                    label: Text(
-                      _isRealtimeTranscribing ? '停止实时转写' : '实时转写',
-                    ),
-                  ),
-                  FilledButton.icon(
-                    onPressed: (_isTranscribing ||
-                            _isRealtimeTranscribing ||
-                            !canTranscribe)
-                        ? null
-                        : _transcribe,
-                    icon: _isTranscribing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.transcribe),
-                    label: Text(_isTranscribing ? '转写中…' : '转写'),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
         ),
-        if (_realtimeText.isNotEmpty || _realtimeConnectionClosed) ...[
-          const SizedBox(height: 16),
-          _SectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionTitle(title: '实时转写结果'),
-                const SizedBox(height: 12),
-                if (_realtimeText.isNotEmpty) SelectableText(_realtimeText),
-                if (_realtimeConnectionClosed) ...[
-                  if (_realtimeText.isNotEmpty) const SizedBox(height: 8),
-                  Text(
-                    '已关闭',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: _warmMuted),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-        if (_error != null) ...[
-          const SizedBox(height: 16),
-          _SectionCard(
-            child: Text(
-              _error!,
-              style: const TextStyle(color: Color(0xFFB42318)),
-            ),
-          ),
-        ],
-        if (_result != null) ...[
-          const SizedBox(height: 16),
-          _SectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionTitle(title: '转写结果'),
-                const SizedBox(height: 12),
-                SelectableText(_result!.text),
-                if (_result!.emotion != null || _result!.event != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: _warmMuted,
-                        ),
-                  ),
-                ],
-                if (_result!.lang != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '语种: ${_result!.lang}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: _warmMuted,
-                        ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -1029,6 +794,39 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                     child: Text(_isSavingConnection ? '测试中…' : '保存连接配置'),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionTitle(
+                title: '工具',
+                subtitle: '进入独立测试页验证录音转写与文本填入',
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.graphic_eq_rounded),
+                title: const Text('音频测试'),
+                subtitle: const Text('长按录音转写，并验证结果展示与填入'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => AudioTestPage(
+                        recorder: widget.recorder,
+                        tempDirProvider: widget.tempDirProvider,
+                        transcribeAudio: widget.transcribeAudio,
+                        onRecordStartFeedback: widget.onRecordStartFeedback,
+                        onRecordStopFeedback: widget.onRecordStopFeedback,
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -1100,49 +898,25 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         ),
         const SizedBox(height: 16),
         _SectionCard(
-          child: const Column(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionTitle(
-                title: '悬浮球',
-                subtitle: '主要开关放在首页，这里保留说明，便于理解当前用途',
-              ),
-              SizedBox(height: 8),
-              Text(
-                '首页用于临时测试和快速控制悬浮球；设置页集中放置连接与转写参数。',
-                style: TextStyle(color: _warmMuted, height: 1.5),
+              const _SectionTitle(title: '关于'),
+              const SizedBox(height: 12),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _handleVersionTap,
+                child: Text(
+                  '版本 $_appVersion',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: _warmText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
               ),
             ],
           ),
         ),
-        if (kDebugMode) ...[
-          const SizedBox(height: 16),
-          _SectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionTitle(
-                  title: '调试',
-                  subtitle: '开发环境下可查看 Talker 日志',
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('打开调试日志'),
-                  subtitle: const Text('查看网络与客户端交互日志'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => TalkerScreen(talker: appTalker),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -1161,6 +935,292 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: _accentBlue),
+      ),
+    );
+  }
+}
+
+class AudioTestPage extends StatefulWidget {
+  const AudioTestPage({
+    super.key,
+    this.recorder,
+    this.tempDirProvider,
+    this.transcribeAudio,
+    this.onRecordStartFeedback,
+    this.onRecordStopFeedback,
+  });
+
+  final AudioRecorder? recorder;
+  final Future<Directory> Function()? tempDirProvider;
+  final Future<TranscriptionResult> Function(String audioPath)? transcribeAudio;
+  final Future<void> Function()? onRecordStartFeedback;
+  final Future<void> Function()? onRecordStopFeedback;
+
+  @override
+  State<AudioTestPage> createState() => _AudioTestPageState();
+}
+
+class _AudioTestPageState extends State<AudioTestPage> {
+  late final AudioRecorder _recorder;
+  final TextEditingController _testInputController = TextEditingController();
+  static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
+
+  String? _audioPath;
+  String? _error;
+  TranscriptionResult? _result;
+  bool _isRecording = false;
+  bool _isTranscribing = false;
+  DateTime? _holdRecordStartTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _recorder = widget.recorder ?? AudioRecorder();
+  }
+
+  @override
+  void dispose() {
+    _testInputController.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _fieldDecoration(String hintText) {
+    return InputDecoration(
+      hintText: hintText,
+      filled: true,
+      fillColor: _warmSurface,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _warmBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _accentBlue),
+      ),
+    );
+  }
+
+  Future<bool> _requireMicPermission() async {
+    final bool ok = await _recorder.hasPermission();
+    if (!ok && mounted) {
+      setState(() => _error = '需要麦克风权限');
+    }
+    return ok;
+  }
+
+  Future<void> _startRecording() async {
+    if (_isRecording || _isTranscribing) return;
+    if (!await _requireMicPermission()) return;
+    final Directory tempDir =
+        await (widget.tempDirProvider?.call() ?? getTemporaryDirectory());
+    final String path =
+        '${tempDir.path}${Platform.pathSeparator}record_${DateTime.now().millisecondsSinceEpoch}.wav';
+    await _recorder.start(
+      const RecordConfig(encoder: AudioEncoder.wav),
+      path: path,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isRecording = true;
+      _holdRecordStartTime = DateTime.now();
+      _error = null;
+    });
+    await (widget.onRecordStartFeedback?.call() ?? _triggerNativeVibration());
+    logDebug('[测试页] 长按录音=开始');
+  }
+
+  Future<void> _stopHoldAndTranscribe() async {
+    if (!_isRecording || _holdRecordStartTime == null) return;
+    final DateTime startTime = _holdRecordStartTime!;
+    _holdRecordStartTime = null;
+    final String? path = await _recorder.stop();
+    await (widget.onRecordStopFeedback?.call() ?? _triggerNativeVibration());
+    if (!mounted) return;
+    setState(() => _isRecording = false);
+    if (path == null) {
+      setState(() => _error = '未获取到录音文件');
+      return;
+    }
+    final Duration duration = DateTime.now().difference(startTime);
+    if (duration < _holdRecordMinDuration) {
+      setState(() {
+        _audioPath = null;
+        _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms';
+      });
+      return;
+    }
+    setState(() {
+      _audioPath = path;
+      _error = null;
+    });
+    await _transcribe();
+  }
+
+  Future<void> _transcribe() async {
+    if (_audioPath == null) {
+      setState(() => _error = '请先录音');
+      return;
+    }
+    final File audioFile = File(_audioPath!);
+    if (!audioFile.existsSync()) {
+      setState(() => _error = '音频文件不存在');
+      return;
+    }
+    setState(() {
+      _isTranscribing = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      final result =
+          await (widget.transcribeAudio?.call(_audioPath!) ??
+              _transcribeAudioWithCurrentSettings(_audioPath!));
+      if (!mounted) return;
+      setState(() {
+        _isTranscribing = false;
+        _result = result;
+      });
+    } catch (e, st) {
+      logError(e, st, 'Audio test transcribe error');
+      if (!mounted) return;
+      setState(() {
+        _isTranscribing = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('音频测试')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          _SectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionTitle(
+                  title: '文本填入验证',
+                  subtitle: '先点一下输入框获取焦点，再长按下方按钮进行测试',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _testInputController,
+                  decoration: _fieldDecoration('点按这里获取焦点'),
+                  maxLines: 3,
+                  minLines: 1,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SectionCard(
+            child: Column(
+              children: [
+                const _SectionTitle(
+                  title: '长按转写',
+                  subtitle: '按住说话，松手后自动上传并展示转写结果',
+                ),
+                const SizedBox(height: 18),
+                GestureDetector(
+                  key: homeHoldToTranscribeKey,
+                  onPanDown: (_) => _startRecording(),
+                  onPanEnd: (_) => _stopHoldAndTranscribe(),
+                  onPanCancel: _stopHoldAndTranscribe,
+                  child: Column(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isRecording
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                              : const Color(0xFFF2F9FF),
+                        ),
+                        child: Icon(
+                          _isRecording ? Icons.stop : Icons.mic_none,
+                          color: _isRecording
+                              ? Theme.of(context).colorScheme.onSurfaceVariant
+                              : _accentBlue,
+                          size: 34,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _isRecording ? '松手结束并转写' : '按住开始录音',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: _warmText,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_audioPath != null) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    '最近录音: ${_audioPath!.split(Platform.pathSeparator).last}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _warmMuted,
+                        ),
+                  ),
+                ],
+                if (_isTranscribing) ...[
+                  const SizedBox(height: 14),
+                  const CircularProgressIndicator(strokeWidth: 2),
+                ],
+              ],
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              child: Text(
+                _error!,
+                style: const TextStyle(color: Color(0xFFB42318)),
+              ),
+            ),
+          ],
+          if (_result != null) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle(title: '转写结果'),
+                  const SizedBox(height: 12),
+                  SelectableText(_result!.text),
+                  if (_result!.emotion != null || _result!.event != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      '情感: ${_result!.emotion ?? "—"}  环境: ${_result!.event ?? "—"}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: _warmMuted,
+                          ),
+                    ),
+                  ],
+                  if (_result!.lang != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '语种: ${_result!.lang}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: _warmMuted,
+                          ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1218,27 +1278,46 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.active});
+class _StatusTile extends StatelessWidget {
+  const _StatusTile({required this.status});
 
-  final String label;
-  final bool active;
+  final _RuntimeStatus status;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: active ? const Color(0xFFF2F9FF) : const Color(0xFFF1EFED),
-        borderRadius: BorderRadius.circular(999),
+        color: status.active ? const Color(0xFFF2F9FF) : const Color(0xFFF6F3F1),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: active ? _accentBlue : _warmMuted,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            status.icon,
+            size: 18,
+            color: status.active ? _accentBlue : _warmMuted,
+          ),
+          const Spacer(),
+          Text(
+            status.title,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: _warmMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            status.label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: status.active ? _accentBlue : _warmText,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
       ),
     );
   }
