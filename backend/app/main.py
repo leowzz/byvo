@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from app.api.v1 import router as api_v1_router
+from app.boot_output import print_setup_qr_to_stdout
 from app.database import init_db
 
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库。"""
     init_db()
     logger.info("byvo backend started")
+    print_setup_qr_to_stdout()
     yield
     logger.info("byvo backend shutdown")
 
