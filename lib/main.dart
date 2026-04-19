@@ -33,6 +33,10 @@ const String _insertTextPrefix = 'INSERT_TEXT:\n';
 final MethodChannel _insertTextChannel = MethodChannel('byvo/insert_text');
 const BackendTranscriptionEngine _sharedBackendEngine =
     BackendTranscriptionEngine();
+bool defaultPlatformIsAndroid() => Platform.isAndroid;
+
+@visibleForTesting
+bool Function() debugPlatformIsAndroid = defaultPlatformIsAndroid;
 
 void main() {
   logInfo('Talker logging ready');
@@ -130,6 +134,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
   StreamSubscription<dynamic>? _overlayLogSub;
 
   bool _showFloatingBall = false;
+  bool _pendingEnableFloatingBallAfterAccessibility = false;
   bool _effectTranscribe = false;
   int _idleTimeoutSec = 30;
   int _tabIndex = 0;
@@ -174,14 +179,21 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed ||
-        !_showFloatingBall ||
-        !Platform.isAndroid) {
+    if (state != AppLifecycleState.resumed || !debugPlatformIsAndroid()) {
       return;
     }
     Future<void>.microtask(() async {
       try {
         if (!mounted) return;
+        if (_pendingEnableFloatingBallAfterAccessibility) {
+          _pendingEnableFloatingBallAfterAccessibility = false;
+          final bool accessibilityEnabled =
+              await _isAccessibilityServiceEnabled();
+          if (!mounted || !accessibilityEnabled) return;
+          await _enableFloatingBall(context);
+          return;
+        }
+        if (!_showFloatingBall) return;
         if (await FlutterOverlayWindow.isActive()) {
           return;
         }
@@ -205,7 +217,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     final show = prefs.getBool(_keyShowFloatingBall) ?? false;
     if (!mounted) return;
     setState(() => _showFloatingBall = show);
-    if (show && Platform.isAndroid) {
+    if (show && debugPlatformIsAndroid()) {
       try {
         if (!await FlutterOverlayWindow.isActive()) {
           await _doShowGlobalOverlay();
@@ -502,10 +514,66 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     }
   }
 
+  Future<bool> _isAccessibilityServiceEnabled() async {
+    return await _insertTextChannel.invokeMethod<bool>(
+          'isAccessibilityServiceEnabled',
+        ) ??
+        false;
+  }
+
+  Future<void> _enableFloatingBall(BuildContext context) async {
+    _pendingEnableFloatingBallAfterAccessibility = false;
+    try {
+      // 先尝试直接显示悬浮窗；能显示则说明已有权限（避免 isPermissionGranted 从后台恢复后误报未授权）
+      try {
+        await _doShowGlobalOverlay();
+        if (!mounted) return;
+        setState(() => _showFloatingBall = true);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_keyShowFloatingBall, true);
+        return;
+      } on PlatformException catch (e) {
+        if (e.code != 'PERMISSION') rethrow;
+        // 无权限，弹出系统「显示在其他应用上层」设置页
+        final granted = await FlutterOverlayWindow.requestPermission();
+        if (!mounted) return;
+        if (granted == true) {
+          await _doShowGlobalOverlay();
+          if (!mounted) return;
+          setState(() => _showFloatingBall = true);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(_keyShowFloatingBall, true);
+        } else {
+          setState(() => _showFloatingBall = false);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
+            );
+          }
+        }
+        return;
+      }
+    } on MissingPluginException {
+      setState(() => _showFloatingBall = false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前环境不支持全局悬浮球')),
+        );
+      }
+    } catch (_) {
+      setState(() => _showFloatingBall = false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('开启悬浮球失败')),
+        );
+      }
+    }
+  }
+
   Future<void> _onFloatingBallSwitchChanged(
       BuildContext context, bool value) async {
     if (value) {
-      if (!Platform.isAndroid) {
+      if (!debugPlatformIsAndroid()) {
         if (mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('全局悬浮球仅支持 Android')),
@@ -513,63 +581,18 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         }
         return;
       }
-      final bool accessibilityEnabled =
-          await _insertTextChannel.invokeMethod<bool>(
-                'isAccessibilityServiceEnabled',
-              ) ??
-              false;
+      final bool accessibilityEnabled = await _isAccessibilityServiceEnabled();
       if (!accessibilityEnabled) {
+        _pendingEnableFloatingBallAfterAccessibility = true;
         await _insertTextChannel
             .invokeMethod<void>('openAccessibilitySettings');
         return;
       }
-      try {
-        // 先尝试直接显示悬浮窗；能显示则说明已有权限（避免 isPermissionGranted 从后台恢复后误报未授权）
-        try {
-          await _doShowGlobalOverlay();
-          if (!mounted) return;
-          setState(() => _showFloatingBall = true);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(_keyShowFloatingBall, true);
-          return;
-        } on PlatformException catch (e) {
-          if (e.code != 'PERMISSION') rethrow;
-          // 无权限，弹出系统「显示在其他应用上层」设置页
-          final granted = await FlutterOverlayWindow.requestPermission();
-          if (!mounted) return;
-          if (granted == true) {
-            await _doShowGlobalOverlay();
-            if (!mounted) return;
-            setState(() => _showFloatingBall = true);
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setBool(_keyShowFloatingBall, true);
-          } else {
-            setState(() => _showFloatingBall = false);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
-              );
-            }
-          }
-          return;
-        }
-      } on MissingPluginException {
-        setState(() => _showFloatingBall = false);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('当前环境不支持全局悬浮球')),
-          );
-        }
-      } catch (_) {
-        setState(() => _showFloatingBall = false);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('开启悬浮球失败')),
-          );
-        }
-      }
+      if (!mounted || !context.mounted) return;
+      await _enableFloatingBall(context);
       return;
     }
+    _pendingEnableFloatingBallAfterAccessibility = false;
     // 关闭前保存当前位置，下次打开时恢复
     try {
       final pos = await FlutterOverlayWindow.getOverlayPosition();
