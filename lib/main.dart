@@ -490,6 +490,16 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         }
         return;
       }
+      final bool accessibilityEnabled =
+          await _insertTextChannel.invokeMethod<bool>(
+                'isAccessibilityServiceEnabled',
+              ) ??
+              false;
+      if (!accessibilityEnabled) {
+        await _insertTextChannel
+            .invokeMethod<void>('openAccessibilitySettings');
+        return;
+      }
       try {
         // 先尝试直接显示悬浮窗；能显示则说明已有权限（避免 isPermissionGranted 从后台恢复后误报未授权）
         try {
