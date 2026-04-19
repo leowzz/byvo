@@ -16,6 +16,7 @@ import 'config/backend_config.dart';
 import 'scan/setup_qr_page.dart';
 import 'scan/setup_qr_parser.dart';
 import 'transcription/backend_engine.dart';
+import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_result.dart';
 
 const String _keyShowFloatingBall = 'show_floating_ball';
@@ -38,6 +39,15 @@ final Stream<dynamic> _overlayEvents =
 @visibleForTesting
 const ValueKey<String> homeHoldToTranscribeKey =
     ValueKey<String>('home_hold_to_transcribe');
+@visibleForTesting
+const ValueKey<String> audioTestRealtimeCardKey =
+    ValueKey<String>('audio_test_realtime_card');
+@visibleForTesting
+const ValueKey<String> audioTestTextInsertionCardKey =
+    ValueKey<String>('audio_test_text_insertion_card');
+@visibleForTesting
+const ValueKey<String> audioTestRealtimeToggleButtonKey =
+    ValueKey<String>('audio_test_realtime_toggle_button');
 bool defaultPlatformIsAndroid() => Platform.isAndroid;
 
 @visibleForTesting
@@ -93,6 +103,49 @@ Future<void> _triggerNativeVibration({int durationMs = 12}) async {
   } catch (_) {
     await HapticFeedback.vibrate();
   }
+}
+
+abstract class RealtimeTranscriptionAdapter {
+  Stream<String> get textStream;
+  Stream<void> get connectionClosedStream;
+  Future<void> start({
+    bool effect = false,
+    bool useLlm = false,
+    int? idleTimeoutSec,
+  });
+  Future<void> stop();
+  void dispose();
+}
+
+class RealtimeStreamEngineAdapter implements RealtimeTranscriptionAdapter {
+  RealtimeStreamEngineAdapter({RealtimeStreamEngine? engine})
+      : _engine = engine ?? RealtimeStreamEngine();
+
+  final RealtimeStreamEngine _engine;
+
+  @override
+  Stream<String> get textStream => _engine.textStream;
+
+  @override
+  Stream<void> get connectionClosedStream => _engine.connectionClosedStream;
+
+  @override
+  Future<void> start({
+    bool effect = false,
+    bool useLlm = false,
+    int? idleTimeoutSec,
+  }) =>
+      _engine.start(
+        effect: effect,
+        useLlm: useLlm,
+        idleTimeoutSec: idleTimeoutSec,
+      );
+
+  @override
+  Future<void> stop() => _engine.stop();
+
+  @override
+  void dispose() => _engine.dispose();
 }
 
 class MyApp extends StatelessWidget {
@@ -324,9 +377,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       );
       _accessibilityStatus = _RuntimeStatus(
         title: '无障碍',
-        label: isAndroid
-            ? (accessibilityEnabled ? '已开启' : '未开启')
-            : '仅 Android',
+        label: isAndroid ? (accessibilityEnabled ? '已开启' : '未开启') : '仅 Android',
         active: isAndroid ? accessibilityEnabled : false,
         icon: Icons.accessibility_new_rounded,
       );
@@ -740,7 +791,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                   _StatusTile(
                     key: const ValueKey<String>('status_mic'),
                     status: _micStatus,
-                    onTap: () => _handlePermissionStatusTap(context, _micStatus),
+                    onTap: () =>
+                        _handlePermissionStatusTap(context, _micStatus),
                   ),
                   _StatusTile(
                     key: const ValueKey<String>('status_accessibility'),
@@ -806,9 +858,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                                 ? Icons.mic_none
                                 : Icons.power_settings_new,
                             size: 34,
-                            color: _showFloatingBall
-                                ? _accentBlue
-                                : _warmMuted,
+                            color: _showFloatingBall ? _accentBlue : _warmMuted,
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -1045,6 +1095,7 @@ class AudioTestPage extends StatefulWidget {
     this.transcribeAudio,
     this.onRecordStartFeedback,
     this.onRecordStopFeedback,
+    this.realtimeAdapterFactory,
   });
 
   final AudioRecorder? recorder;
@@ -1052,6 +1103,7 @@ class AudioTestPage extends StatefulWidget {
   final Future<TranscriptionResult> Function(String audioPath)? transcribeAudio;
   final Future<void> Function()? onRecordStartFeedback;
   final Future<void> Function()? onRecordStopFeedback;
+  final RealtimeTranscriptionAdapter Function()? realtimeAdapterFactory;
 
   @override
   State<AudioTestPage> createState() => _AudioTestPageState();
@@ -1063,11 +1115,19 @@ class _AudioTestPageState extends State<AudioTestPage> {
   static const Duration _holdRecordMinDuration = Duration(milliseconds: 500);
 
   String? _audioPath;
-  String? _error;
+  String? _fileError;
+  String? _realtimeError;
   TranscriptionResult? _result;
   bool _isRecording = false;
   bool _isTranscribing = false;
   DateTime? _holdRecordStartTime;
+  RealtimeTranscriptionAdapter? _realtimeAdapter;
+  StreamSubscription<String>? _realtimeTextSub;
+  StreamSubscription<void>? _realtimeClosedSub;
+  bool _isRealtimeConnecting = false;
+  bool _isRealtimeListening = false;
+  String _realtimeStatus = '未开始';
+  String _realtimeText = '';
 
   @override
   void initState() {
@@ -1077,6 +1137,7 @@ class _AudioTestPageState extends State<AudioTestPage> {
 
   @override
   void dispose() {
+    unawaited(_disposeRealtimeAdapter());
     _testInputController.dispose();
     super.dispose();
   }
@@ -1102,7 +1163,7 @@ class _AudioTestPageState extends State<AudioTestPage> {
   Future<bool> _requireMicPermission() async {
     final bool ok = await _recorder.hasPermission();
     if (!ok && mounted) {
-      setState(() => _error = '需要麦克风权限');
+      setState(() => _fileError = '需要麦克风权限');
     }
     return ok;
   }
@@ -1122,7 +1183,7 @@ class _AudioTestPageState extends State<AudioTestPage> {
     setState(() {
       _isRecording = true;
       _holdRecordStartTime = DateTime.now();
-      _error = null;
+      _fileError = null;
     });
     await (widget.onRecordStartFeedback?.call() ?? _triggerNativeVibration());
     logDebug('[测试页] 长按录音=开始');
@@ -1137,43 +1198,42 @@ class _AudioTestPageState extends State<AudioTestPage> {
     if (!mounted) return;
     setState(() => _isRecording = false);
     if (path == null) {
-      setState(() => _error = '未获取到录音文件');
+      setState(() => _fileError = '未获取到录音文件');
       return;
     }
     final Duration duration = DateTime.now().difference(startTime);
     if (duration < _holdRecordMinDuration) {
       setState(() {
         _audioPath = null;
-        _error = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms';
+        _fileError = '录音太短，请按住至少 ${_holdRecordMinDuration.inMilliseconds}ms';
       });
       return;
     }
     setState(() {
       _audioPath = path;
-      _error = null;
+      _fileError = null;
     });
     await _transcribe();
   }
 
   Future<void> _transcribe() async {
     if (_audioPath == null) {
-      setState(() => _error = '请先录音');
+      setState(() => _fileError = '请先录音');
       return;
     }
     final File audioFile = File(_audioPath!);
     if (!audioFile.existsSync()) {
-      setState(() => _error = '音频文件不存在');
+      setState(() => _fileError = '音频文件不存在');
       return;
     }
     setState(() {
       _isTranscribing = true;
-      _error = null;
+      _fileError = null;
       _result = null;
     });
     try {
-      final result =
-          await (widget.transcribeAudio?.call(_audioPath!) ??
-              _transcribeAudioWithCurrentSettings(_audioPath!));
+      final result = await (widget.transcribeAudio?.call(_audioPath!) ??
+          _transcribeAudioWithCurrentSettings(_audioPath!));
       if (!mounted) return;
       setState(() {
         _isTranscribing = false;
@@ -1184,9 +1244,134 @@ class _AudioTestPageState extends State<AudioTestPage> {
       if (!mounted) return;
       setState(() {
         _isTranscribing = false;
-        _error = e.toString();
+        _fileError = e.toString();
       });
     }
+  }
+
+  RealtimeTranscriptionAdapter _ensureRealtimeAdapter() {
+    return _realtimeAdapter ??= (widget.realtimeAdapterFactory?.call() ??
+        RealtimeStreamEngineAdapter());
+  }
+
+  Future<void> _disposeRealtimeAdapter() async {
+    final adapter = _realtimeAdapter;
+    final textSub = _realtimeTextSub;
+    final closedSub = _realtimeClosedSub;
+    _realtimeTextSub = null;
+    _realtimeClosedSub = null;
+    _realtimeAdapter = null;
+    unawaited(textSub?.cancel() ?? Future<void>.value());
+    unawaited(closedSub?.cancel() ?? Future<void>.value());
+    try {
+      await adapter?.stop();
+    } catch (e, st) {
+      logError(e, st, 'Audio test realtime stop error');
+    }
+    adapter?.dispose();
+  }
+
+  Future<void> _handleRealtimeStreamError(
+      Object error, StackTrace stackTrace) async {
+    logError(error, stackTrace, 'Audio test realtime stream error');
+    if (mounted) {
+      setState(() {
+        _isRealtimeConnecting = false;
+        _isRealtimeListening = false;
+        _realtimeStatus = '连接异常';
+        _realtimeError = error.toString();
+      });
+    }
+    await _disposeRealtimeAdapter();
+  }
+
+  Future<void> _startRealtimeListening() async {
+    if (_isRealtimeListening || _isRealtimeConnecting) return;
+    setState(() {
+      _isRealtimeConnecting = true;
+      _realtimeStatus = '连接中…';
+      _realtimeError = null;
+    });
+    try {
+      final effect = await loadEffectTranscribe();
+      final idleTimeoutSec = await loadIdleTimeoutSec();
+      final adapter = _ensureRealtimeAdapter();
+      await _realtimeTextSub?.cancel();
+      await _realtimeClosedSub?.cancel();
+      _realtimeTextSub = adapter.textStream.listen((text) {
+        if (!mounted) return;
+        setState(() => _realtimeText = text);
+      }, onError: (Object error, StackTrace stackTrace) {
+        unawaited(_handleRealtimeStreamError(error, stackTrace));
+      });
+      _realtimeClosedSub = adapter.connectionClosedStream.listen((_) {
+        unawaited(_handleRealtimeAutoDisconnected());
+      });
+      await adapter.start(
+        effect: effect,
+        useLlm: effect,
+        idleTimeoutSec: idleTimeoutSec,
+      );
+      if (!mounted) return;
+      if (_realtimeAdapter != adapter || !_isRealtimeConnecting) return;
+      setState(() {
+        _isRealtimeConnecting = false;
+        _isRealtimeListening = true;
+        _realtimeStatus = '实时监听中';
+      });
+    } catch (e, st) {
+      logError(e, st, 'Audio test realtime start error');
+      if (mounted) {
+        setState(() {
+          _isRealtimeConnecting = false;
+          _isRealtimeListening = false;
+          _realtimeStatus = '启动失败';
+          _realtimeError = e.toString();
+        });
+      }
+      await _disposeRealtimeAdapter();
+    }
+  }
+
+  Future<void> _stopRealtimeListening({String status = '已停止监听'}) async {
+    if (!_isRealtimeListening &&
+        !_isRealtimeConnecting &&
+        _realtimeAdapter == null) {
+      return;
+    }
+    final textSub = _realtimeTextSub;
+    final closedSub = _realtimeClosedSub;
+    _realtimeTextSub = null;
+    _realtimeClosedSub = null;
+    await textSub?.cancel();
+    unawaited(closedSub?.cancel() ?? Future<void>.value());
+    await _realtimeAdapter?.stop();
+    if (!mounted) return;
+    setState(() {
+      _isRealtimeConnecting = false;
+      _isRealtimeListening = false;
+      _realtimeStatus = status;
+    });
+  }
+
+  Future<void> _handleRealtimeAutoDisconnected() async {
+    if (!_isRealtimeListening && !_isRealtimeConnecting) return;
+    if (mounted) {
+      setState(() {
+        _isRealtimeConnecting = false;
+        _isRealtimeListening = false;
+        _realtimeStatus = '已自动断开（长时间无文本）';
+      });
+    }
+    await _disposeRealtimeAdapter();
+  }
+
+  Future<void> _toggleRealtimeListening() async {
+    if (_isRealtimeListening || _isRealtimeConnecting) {
+      await _stopRealtimeListening();
+      return;
+    }
+    await _startRealtimeListening();
   }
 
   @override
@@ -1196,22 +1381,78 @@ class _AudioTestPageState extends State<AudioTestPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
-          _SectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionTitle(
-                  title: '文本填入验证',
-                  subtitle: '先点一下输入框获取焦点，再长按下方按钮进行测试',
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _testInputController,
-                  decoration: _fieldDecoration('点按这里获取焦点'),
-                  maxLines: 3,
-                  minLines: 1,
-                ),
-              ],
+          KeyedSubtree(
+            key: audioTestRealtimeCardKey,
+            child: _SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle(
+                    title: '实时转写',
+                    subtitle: '点击开始连续监听，空闲时会自动停止连接',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    key: audioTestRealtimeToggleButtonKey,
+                    onPressed: _toggleRealtimeListening,
+                    icon: Icon(
+                      (_isRealtimeListening || _isRealtimeConnecting)
+                          ? Icons.stop_circle
+                          : Icons.hearing,
+                    ),
+                    label: Text(
+                      _isRealtimeConnecting
+                          ? '连接中…'
+                          : _isRealtimeListening
+                              ? '停止监听'
+                              : '开始连续监听',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '状态：$_realtimeStatus',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _warmMuted,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _realtimeText.isEmpty ? '暂无实时文本' : _realtimeText,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: _warmText,
+                        ),
+                  ),
+                  if (_realtimeError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _realtimeError!,
+                      style: const TextStyle(color: Color(0xFFB42318)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          KeyedSubtree(
+            key: audioTestTextInsertionCardKey,
+            child: _SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle(
+                    title: '文本填入验证',
+                    subtitle: '先点一下输入框获取焦点，再长按下方按钮进行测试',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _testInputController,
+                    decoration: _fieldDecoration('点按这里获取焦点'),
+                    maxLines: 3,
+                    minLines: 1,
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -1277,11 +1518,11 @@ class _AudioTestPageState extends State<AudioTestPage> {
               ],
             ),
           ),
-          if (_error != null) ...[
+          if (_fileError != null) ...[
             const SizedBox(height: 16),
             _SectionCard(
               child: Text(
-                _error!,
+                _fileError!,
                 style: const TextStyle(color: Color(0xFFB42318)),
               ),
             ),
@@ -1391,8 +1632,9 @@ class _StatusTile extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color:
-                status.active ? const Color(0xFFF2F9FF) : const Color(0xFFF6F3F1),
+            color: status.active
+                ? const Color(0xFFF2F9FF)
+                : const Color(0xFFF6F3F1),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
@@ -1447,8 +1689,10 @@ class _LatencyBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isFast = latencyMs < 100;
-    final Color dotColor = isFast ? const Color(0xFF12B76A) : const Color(0xFFF79009);
-    final Color bgColor = isFast ? const Color(0x1F12B76A) : const Color(0x1FF79009);
+    final Color dotColor =
+        isFast ? const Color(0xFF12B76A) : const Color(0xFFF79009);
+    final Color bgColor =
+        isFast ? const Color(0x1F12B76A) : const Color(0x1FF79009);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -1666,7 +1910,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
         _log('[悬浮球] 录制=无权限');
         if (debugPlatformIsAndroid()) {
           try {
-            await _insertTextChannel.invokeMethod<bool>('requestMicrophonePermission');
+            await _insertTextChannel
+                .invokeMethod<bool>('requestMicrophonePermission');
           } catch (_) {}
         }
       } else {
@@ -1694,9 +1939,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
     }
     try {
       _log('[悬浮球] 转写=开始');
-      final result =
-          await (widget.transcribeAudio?.call(path) ??
-              _transcribeAudioWithCurrentSettings(path));
+      final result = await (widget.transcribeAudio?.call(path) ??
+          _transcribeAudioWithCurrentSettings(path));
       _log('[悬浮球] 转写=完成');
       _logLong('[悬浮球] 转写结果: ', result.text);
       FlutterOverlayWindow.shareData('$_insertTextPrefix${result.text}');
@@ -1708,7 +1952,8 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
                 false;
         if (!accessibilityEnabled) {
           _log('[悬浮球] 无障碍未开启，打开设置');
-          await _insertTextChannel.invokeMethod<void>('openAccessibilitySettings');
+          await _insertTextChannel
+              .invokeMethod<void>('openAccessibilitySettings');
           return;
         }
         _log('[悬浮球] 请求填入当前输入框');
