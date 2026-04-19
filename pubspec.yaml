@@ -32,7 +32,6 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  sherpa_onnx: ^1.12.23
   file_picker: ^8.0.0
   record: ^6.0.0
   path_provider: ^2.1.0

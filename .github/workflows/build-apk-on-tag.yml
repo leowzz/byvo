@@ -42,8 +42,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Resolve app version from tag
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME#v}"
+          TAG_NAME="${TAG_NAME#V}"
+          echo "APP_VERSION_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
       - name: Build APK
-        run: flutter build apk --target-platform android-arm64
+        run: |
+          flutter build apk \
+            --target-platform android-arm64 \
+            --build-name="${APP_VERSION_NAME}" \
+            --build-number="${APP_VERSION_CODE}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
