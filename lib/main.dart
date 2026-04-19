@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config/backend_config.dart';
 import 'debug_log.dart';
+import 'scan/setup_qr_page.dart';
+import 'scan/setup_qr_parser.dart';
 import 'transcription/backend_engine.dart';
 import 'transcription/realtime_stream_engine.dart';
 import 'transcription/transcription_result.dart';
@@ -131,14 +133,20 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _pollOverlayLog();
+    if (state == AppLifecycleState.resumed) {
+      _pollOverlayLog();
+    }
     if (state != AppLifecycleState.resumed ||
         !_showFloatingBall ||
-        !Platform.isAndroid) return;
+        !Platform.isAndroid) {
+      return;
+    }
     Future<void>.microtask(() async {
       try {
         if (!mounted) return;
-        if (await FlutterOverlayWindow.isActive()) return;
+        if (await FlutterOverlayWindow.isActive()) {
+          return;
+        }
         await _doShowGlobalOverlay();
       } catch (_) {}
     });
@@ -161,8 +169,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     setState(() => _showFloatingBall = show);
     if (show && Platform.isAndroid) {
       try {
-        if (!await FlutterOverlayWindow.isActive())
+        if (!await FlutterOverlayWindow.isActive()) {
           await _doShowGlobalOverlay();
+        }
       } catch (_) {}
     }
   }
@@ -278,7 +287,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
     });
     if (kDebugMode) debugPrint('[按钮] 录制=停止 path=${path != null}');
-    if (path != null) _transcribe(context);
+    if (path != null && mounted) {
+      await _transcribe();
+    }
   }
 
   /// 长按录音松手：停止录音，若时长达到 [_holdRecordMinDuration] 则上传并调用转写接口。
@@ -301,10 +312,12 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       _audioPath = path;
       _error = null;
     });
-    await _transcribe(context);
+    if (mounted) {
+      await _transcribe();
+    }
   }
 
-  Future<void> _transcribe(BuildContext? context) async {
+  Future<void> _transcribe() async {
     if (_audioPath == null) {
       setState(() => _error = '请先选择或录制音频');
       return;
@@ -338,7 +351,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         _error = e.toString();
       });
       if (kDebugMode) debugPrint('[按钮] 转写=失败');
-      if (context != null && context.mounted) {
+      if (mounted) {
         _showErrorDialog(context, '转写失败', e.toString());
       }
     }
@@ -519,7 +532,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                   color: Theme.of(context)
                       .colorScheme
                       .inversePrimary
-                      .withOpacity(0.3)),
+                      .withValues(alpha: 0.3)),
               alignment: Alignment.centerLeft,
               child: const Text('设置',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -644,7 +657,9 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                       onPanDown: (_) {
                         if (_isTranscribing ||
                             _isRealtimeTranscribing ||
-                            _isRecording) return;
+                            _isRecording) {
+                          return;
+                        }
                         _holdRecordStartTime = DateTime.now();
                         if (kDebugMode) debugPrint('[按钮] 长按录音=按下');
                         _startRecording();
@@ -709,7 +724,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
                           _isRealtimeTranscribing ||
                           !canTranscribe)
                       ? null
-                      : () => _transcribe(context),
+                      : _transcribe,
                   icon: _isTranscribing
                       ? const SizedBox(
                           width: 20,
@@ -814,7 +829,7 @@ class _DebugLogPanelState extends State<_DebugLogPanel> {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
         border: Border(top: BorderSide(color: theme.dividerColor)),
       ),
       child: Column(
@@ -902,6 +917,29 @@ class _BackendSettingsDialogState extends State<_BackendSettingsDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            OutlinedButton.icon(
+              onPressed: () async {
+                final raw = await Navigator.of(context).push<String>(
+                  MaterialPageRoute<String>(
+                    builder: (_) => const SetupQrPage(),
+                  ),
+                );
+                if (!context.mounted || raw == null) return;
+
+                try {
+                  final config = parseByvoSetupUri(raw);
+                  _urlController.text = config.baseUrl;
+                  _apiKeyController.text = config.apiKey;
+                } on FormatException catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(e.message.toString())),
+                  );
+                }
+              },
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('扫码填充'),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _urlController,
               decoration: const InputDecoration(
