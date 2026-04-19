@@ -7,46 +7,96 @@
 - `lib/` Flutter 客户端
 - `backend/` FastAPI 后端（豆包转写、可选 Ark 纠错、SQLite 持久化）
 
-## 后端
+## 后端独立部署
 
-使用 uv 作为包管理器。
+后端目录是 `backend/`，可作为独立 FastAPI 服务部署。
 
-### 启动
+### 安装依赖
 
 ```bash
 cd backend
-uv sync
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv sync --extra dev
 ```
 
 ### 配置
 
-配置使用 YAML 格式，复制 `config/config.yaml.example` 为 `config/config.yaml` 后修改：
+复制 `backend/config/config.yaml.example` 为 `backend/config/config.yaml`，并至少配置：
 
 ```yaml
-database_url: sqlite:///./byvo.db
-volcengine:
-  app_key: ""
-  access_key: ""
-  resource_id: ""
-  ark_api_key: ""   # 可选，用于流式纠错
-  ark_model_id: "doubao-seed-1-8-251228"
+api_base_url: "http://192.168.1.20:8000"
+
+auth:
+  api_keys:
+    - "replace-with-a-long-random-key"
 ```
 
-豆包凭证可由环境变量 `VOLCENGINE__APP_KEY`、`VOLCENGINE__ACCESS_KEY`、`VOLCENGINE__RESOURCE_ID` 覆盖。
+也可通过环境变量覆盖（示例）：
 
-### API
+```bash
+AUTH__API_KEYS='["replace-with-a-long-random-key"]'
+```
 
-- `POST /api/v1/transcribe`：multipart/form-data，`audio`（WAV 文件），豆包转写
-- `WebSocket /api/v1/transcribe/stream`：流式转写，客户端发送 PCM（16k/16bit/mono）二进制，服务端返回 JSON `{ "text": "当前全文", "is_final": false }`；若配置 Ark 则带纠错
-- `GET /health`：健康检查
+豆包凭证仍可由环境变量 `VOLCENGINE__APP_KEY`、`VOLCENGINE__ACCESS_KEY`、`VOLCENGINE__RESOURCE_ID` 覆盖。
+
+### 启动二维码
+
+若配置了：
+
+- `api_base_url`
+- `auth.api_keys`
+
+后端启动时会在终端打印：
+
+- `API Base URL`
+- `API Key`
+- 一个用于客户端扫码填充的二维码
+
+二维码内容格式为：
+
+`byvo://setup?base_url=...&api_key=...`
+
+若 `api_base_url` 或 API key 缺失，则服务正常启动，但会跳过二维码输出。
+
+### 启动
+
+开发（热重载）：
+
+```bash
+cd backend
+make run-dev
+```
+
+部署/生产：
+
+```bash
+cd backend
+make run
+```
+
+### 认证与健康检查
+
+- `POST /api/v1/transcribe` 和 `WebSocket /api/v1/transcribe/stream` 需要请求头：`X-API-Key: <your-api-key>`
+- `GET /health` 不需要认证，可用于探活：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
 
 ## 客户端
 
-Flutter 客户端通过 HTTP 调用后端转写。在设置中配置后端地址（默认 `http://10.0.2.2:8000`，适用于 Android 模拟器访问本机）。
+Flutter 客户端在设置中需要同时配置：
 
-- **录制 + 转写**：录制 WAV 后 POST 到后端（豆包）
-- **实时转写**：WebSocket 流式连接，`record.startStream` + WS 推送 PCM，边录边出字
+- 后端 Base URL
+- API Key
+
+在“后端地址配置”弹窗中，可点击“扫码填充”扫描服务端终端二维码，自动回填：
+
+- 后端 Base URL
+- API Key
+
+扫码后仍需点击“保存”才会落盘生效。
+
+客户端通过 HTTP 与 WebSocket 调用后端转写。
 
 ```bash
 flutter pub get

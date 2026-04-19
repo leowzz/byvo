@@ -33,12 +33,27 @@ class VolcengineConfig(BaseModel):
         return bool(self.ark_api_key and self.ark_model_id)
 
 
+class AuthConfig(BaseModel):
+    """静态 API key 认证配置。"""
+
+    api_keys: list[str] = Field(default_factory=list, description="允许访问后端的 API keys")
+
+    @property
+    def normalized_api_keys(self) -> list[str]:
+        return [key.strip() for key in self.api_keys if key.strip()]
+
+
 class Settings(BaseSettings):
     """应用配置，优先级：环境变量 > config.yaml > 默认值。"""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        env_nested_delimiter="__",
+    )
 
     database_url: str = Field(default="sqlite:///./byvo.db")
+    api_base_url: str = Field(default="", description="客户端用于访问后端的 Base URL")
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     volcengine: VolcengineConfig = Field(default_factory=VolcengineConfig)
     transcribe_ws_idle_timeout_sec: int = Field(default=5, description="实时转写：无新识别内容超过该秒数则自动关闭连接")
 

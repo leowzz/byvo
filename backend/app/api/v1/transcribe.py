@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
 from app.models.transcription import TranscriptionRecord
@@ -19,6 +20,7 @@ router = APIRouter()
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
+    _: None = Depends(require_api_key),
     audio: UploadFile = File(...),
     effect: bool = Query(False, description="是否开启效果转写/去口语化（语义顺滑）"),
     use_llm: bool = Query(False, description="是否启用 LLM 纠错，由后端配置决定"),

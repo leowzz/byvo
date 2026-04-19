@@ -1,0 +1,14 @@
+name: byvo_insert_text
+description: Platform channel for overlay to request insert text into focused field.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.6.1
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.byvo.insert_text
+        pluginClass: ByvoInsertTextPlugin
