@@ -1,0 +1,1 @@
+Voice transcription with a configurable self-hosted backend.

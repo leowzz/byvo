@@ -1,0 +1,16 @@
+byvo is an Android voice transcription client built with Flutter.
+
+It records audio, sends it to a compatible backend for transcription, and can insert the resulting text into the currently focused input field through Android accessibility and overlay features.
+
+Features:
+
+- Push-to-talk voice transcription
+- Real-time streaming transcription
+- QR-based backend setup
+- Floating overlay shortcut for quick recording
+- Optional text insertion into the active input field
+- Compatible FastAPI backend included in this repository
+
+The Android app does not require any proprietary services on the device itself, but useful operation depends on a compatible network backend configured by the user.
+
+Permissions used by the app include microphone access for recording, camera access for QR setup scanning, network access for backend communication, and Android accessibility/overlay capabilities for text insertion workflows.
