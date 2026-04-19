@@ -1251,7 +1251,12 @@ void overlayMain() {
   runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      scaffoldBackgroundColor: Colors.transparent,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: _accentBlue,
+        brightness: Brightness.light,
+        surface: _warmSurface,
+      ),
       useMaterial3: true,
     ),
     home: const OverlayBallPage(),
@@ -1389,13 +1394,13 @@ class _OverlayBallPageState extends State<OverlayBallPage> {
                   shape: BoxShape.circle,
                   color: isRecording
                       ? Theme.of(context).colorScheme.surfaceContainerHighest
-                      : Theme.of(context).colorScheme.primaryContainer,
+                      : const Color(0xFFF2F9FF),
                 ),
                 child: Icon(
                   isRecording ? Icons.stop : Icons.mic_none,
                   color: isRecording
                       ? Theme.of(context).colorScheme.onSurfaceVariant
-                      : Theme.of(context).colorScheme.onPrimaryContainer,
+                      : _accentBlue,
                   size: size * 0.5,
                 ),
               ),

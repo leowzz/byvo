@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 后端 API 地址
@@ -68,4 +69,38 @@ String backendUrlToWebSocket(String baseUrl) {
     return baseUrl.replaceFirst('http://', 'ws://');
   }
   return 'ws://$baseUrl';
+}
+
+Future<void> verifyBackendConnection({
+  required String baseUrl,
+  required String apiKey,
+}) async {
+  final normalizedBaseUrl = baseUrl.trim();
+  final normalizedApiKey = apiKey.trim();
+  if (normalizedBaseUrl.isEmpty) {
+    throw StateError('请输入后端地址');
+  }
+  if (normalizedApiKey.isEmpty) {
+    throw StateError('请输入 API Key');
+  }
+
+  final dio = Dio();
+  try {
+    final response = await dio.get<Map<String, dynamic>>(
+      '$normalizedBaseUrl/api/v1/auth-check',
+      options: Options(
+        headers: <String, String>{'X-API-Key': normalizedApiKey},
+        validateStatus: (_) => true,
+      ),
+    );
+    if (response.statusCode == 200) {
+      return;
+    }
+    if (response.statusCode == 401) {
+      throw StateError('API Key 无效');
+    }
+    throw StateError('连接测试失败: ${response.statusCode}');
+  } on DioException catch (e) {
+    throw StateError('连接测试失败: ${e.message ?? '无法连接到服务端'}');
+  }
 }
