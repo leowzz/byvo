@@ -4,10 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.app.ActivityManager
-import android.os.Build
 import android.provider.Settings
 import android.service.quicksettings.TileService
 import cn.wleo.byvo.insert_text.AccessibilityStatus
+import flutter.overlay.window.flutter_overlay_window.ByvoOverlayServiceStarter
 
 class FloatingBallController(
     private val context: Context,
@@ -57,7 +57,7 @@ class FloatingBallController(
 
     fun tileActive(): Boolean = desiredEnabled()
 
-    fun resolvedTileActive(): Boolean = desiredEnabled() && isOverlayRunning()
+    fun resolvedTileActive(): Boolean = isOverlayRunning()
 
     fun isOverlayRunning(): Boolean = isOverlayServiceRunning()
 
@@ -81,13 +81,7 @@ class FloatingBallController(
     }
 
     private fun startOverlayService(): Boolean {
-        val intent = Intent().setClassName(context, OVERLAY_SERVICE_CLASS_NAME)
-        val service = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-        return service != null
+        return ByvoOverlayServiceStarter.startFloatingBall(context) != null
     }
 
     private fun hasTileServiceClass(): Boolean {
