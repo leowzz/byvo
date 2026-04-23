@@ -532,6 +532,11 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     await _refreshHomeStatuses();
   }
 
+  Future<void> _persistShowFloatingBall(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowFloatingBall, value);
+  }
+
   /// 仅全局悬浮窗（Android）。插件原生侧把宽高当像素用，56 会变成很小方块，故用 180。
   /// enableDrag: true 时由原生处理拖动；长按录音依赖 Flutter 收到触摸，若被原生占用则仅在未拖动时生效。
   Future<void> _doShowGlobalOverlay() async {
@@ -646,8 +651,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         await _doShowGlobalOverlay();
         if (!mounted) return;
         setState(() => _showFloatingBall = true);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(_keyShowFloatingBall, true);
+        await _persistShowFloatingBall(true);
         return;
       } on PlatformException catch (e) {
         if (e.code != 'PERMISSION') rethrow;
@@ -658,10 +662,10 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
           await _doShowGlobalOverlay();
           if (!mounted) return;
           setState(() => _showFloatingBall = true);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(_keyShowFloatingBall, true);
+          await _persistShowFloatingBall(true);
         } else {
           setState(() => _showFloatingBall = false);
+          await _persistShowFloatingBall(false);
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('需要允许「显示在其他应用上层」才能使用全局悬浮球')),
@@ -672,6 +676,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
     } on MissingPluginException {
       setState(() => _showFloatingBall = false);
+      await _persistShowFloatingBall(false);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前环境不支持全局悬浮球')),
@@ -679,6 +684,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
       }
     } catch (_) {
       setState(() => _showFloatingBall = false);
+      await _persistShowFloatingBall(false);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('开启悬浮球失败')),
@@ -698,6 +704,8 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
         }
         return;
       }
+      setState(() => _showFloatingBall = true);
+      await _persistShowFloatingBall(true);
       final bool accessibilityEnabled = await _isAccessibilityServiceEnabled();
       if (!accessibilityEnabled) {
         _pendingEnableFloatingBallAfterAccessibility = true;
@@ -720,8 +728,7 @@ class _TranscriptionMvpPageState extends State<TranscriptionMvpPage>
     } catch (_) {}
     // 先更新 UI 和偏好，再关闭 overlay，保证开关一定能关上（即使 overlay 已消失或 closeOverlay 异常）
     setState(() => _showFloatingBall = false);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyShowFloatingBall, false);
+    await _persistShowFloatingBall(false);
     try {
       await FlutterOverlayWindow.closeOverlay();
     } catch (_) {}
