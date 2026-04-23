@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="accessibility_service_description">用于将语音转写文本填入当前聚焦的输入框。仅在您使用 byvo 悬浮球长按录音转写后，将转写结果填入您当前正在编辑的输入框。</string>
+    <string name="quick_settings_tile_label">悬浮球</string>
+    <string name="quick_settings_overlay_permission_denied">悬浮窗权限未开启，无法打开悬浮球</string>
+    <string name="quick_settings_accessibility_denied">无障碍未开启，无法打开悬浮球</string>
+    <string name="quick_settings_enable_failed">开启悬浮球失败</string>
 </resources>
